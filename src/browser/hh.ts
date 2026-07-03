@@ -77,7 +77,10 @@ export class HhBrowser {
     return `${title}\n${meta.join("\n")}\n${body}`.trim();
   }
 
-  async apply(url: string, letter: string, dryRun: boolean): Promise<"applied" | "dry_run" | "no_button"> {
+  async apply(
+    url: string, letter: string, dryRun: boolean,
+    answerFn?: (questions: QuestionnaireItem[]) => Promise<QuestionnaireAnswer[]>,
+  ): Promise<"applied" | "dry_run" | "no_button"> {
     await this.page.goto(url, { waitUntil: "domcontentloaded" });
     await sleep(2000, 5000);
     await this.guard();
@@ -93,6 +96,13 @@ export class HhBrowser {
     // Возможен экран "отклик в другой стране/регионе" — подтверждаем, если появился
     const relocate = this.page.locator('[data-qa="relocation-warning-confirm"]');
     if (await relocate.count() > 0) { await relocate.click(); await sleep(1000, 2000); }
+    // Анкета работодателя, если есть: извлекаем вопросы, отвечаем через колбэк (LLM в пайплайне), заполняем.
+    if (answerFn && await this.hasQuestionnaire()) {
+      const questions = await this.extractQuestionnaire();
+      const answers = await answerFn(questions);
+      await this.fillQuestionnaire(answers, questions);
+      await sleep(800, 1500);
+    }
     const toggle = this.page.locator(SEL.letterToggle);
     if (await toggle.count() > 0) { await toggle.click(); await sleep(500, 1500); }
     const input = this.page.locator(SEL.letterInput);

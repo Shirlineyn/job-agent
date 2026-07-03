@@ -5,6 +5,7 @@ import { applyHardFilters } from "../filters.js";
 import { scoreVacancy } from "../llm/scoring.js";
 import { researchCompany } from "../llm/research.js";
 import { writeLetter } from "../llm/letter.js";
+import { answerQuestionnaire } from "../llm/questionnaire.js";
 import { CaptchaDetected, LoggedOut, type HhBrowser } from "../browser/hh.js";
 import { sleep } from "../browser/humanize.js";
 import type { Config } from "../config.js";
@@ -91,7 +92,8 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         // dry-run: письмо сохранено, браузер не трогаем (повторная навигация по одним
         // и тем же вакансиям каждую сессию — заметный анти-бот паттерн, а проверка не нужна).
         if (mode === "dry_run") continue;
-        const result = await guarded(() => deps.browser.apply(v.url, letter, false));
+        const result = await guarded(() => deps.browser.apply(v.url, letter, false,
+          (qs) => answerQuestionnaire(ctx(v.id), deps.claude, cfg, deps.resume, qs)));
         if (result === "stop") break;
         if (result === "skip" || result === "no_button") { repo.setStatus(db, v.id, "failed"); continue; }
         if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; await sleep(...cfg.applyPauseMs); }
