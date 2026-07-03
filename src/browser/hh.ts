@@ -1,5 +1,5 @@
 import { chromium, type BrowserContext, type Page } from "playwright";
-import { sleep, jitter } from "./humanize.js";
+import { sleep } from "./humanize.js";
 import type { VacancyInsert, WorkFormat } from "../state/types.js";
 import type { QuestionnaireItem, QuestionnaireAnswer } from "../llm/questionnaire.js";
 
@@ -97,42 +97,51 @@ export class HhBrowser {
     // это не нажимать её вовсе. Письмо уже лежит в БД и видно через get_queue.
     if (dryRun) return "dry_run";
     await btn.click();
-    await sleep(1500, 3500);
+    await sleep(2000, 3500);   // дать отклику уйти и странице перерисоваться
 
     // После клика по «Откликнуться» hh ведёт себя двояко:
     //  • attach — вакансия БЕЗ анкеты: клик УЖЕ отправил отклик («Резюме доставлено»),
     //             письмо прикладывается после через «Приложить сопроводительное письмо».
     //  • form   — форма отклика с анкетой и/или полем письма; submit отдельный (не отправлено).
-    // Определяем сценарий, попутно проходя релокейт-подтверждение. attach проверяем ПЕРВЫМ:
-    // его наличие однозначно значит «отклик уже ушёл» — в этом случае форменную ветку не трогаем.
+    // Отправку ловим по НЕСКОЛЬКИМ признакам сразу — одиночный data-qa оказался timing-флэки
+    // (отправленный отклик уходил в no_button → failed). Порядок: сначала форма (её надо
+    // засабмитить самим), затем признаки отправки, в т.ч. исчезновение самой кнопки отклика.
+    const isDelivered = async (): Promise<boolean> => {
+      if (await this.page.locator(SEL.attachLetter).count() > 0) return true;
+      if (await this.page.locator(SEL.deliveredChat).count() > 0) return true;
+      const t = await this.page.locator("body").innerText().catch(() => "");
+      return /Резюме доставлено|Резюме отправлено|Вы откликнулись|Отклик доставлен|Отклик отправлен|Ваш отклик|Вы уже откликались/i.test(t);
+    };
+
     let scenario: "attach" | "form" | "unknown" = "unknown";
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 20; i++) {
       await this.guard();
       const relocate = this.page.locator('[data-qa="relocation-warning-confirm"]');
       if (await relocate.count() > 0) { await relocate.click(); await sleep(1000, 2000); continue; }
-      // отклик уже доставлен? кнопка «приложить письмо» ИЛИ ссылка «Чат» из карточки «Резюме доставлено».
-      // Ловим отправку по надёжному data-qa (а не по тексту), иначе отправленный отклик уйдёт в no_button.
-      if (await this.page.locator(SEL.attachLetter).count() > 0
-          || await this.page.locator(SEL.deliveredChat).count() > 0) { scenario = "attach"; break; }
       if (await this.hasQuestionnaire()
           || await this.page.locator(SEL.letterToggle).count() > 0
+          || await this.page.locator(SEL.letterInput).count() > 0
           || await this.page.locator(SEL.submit).count() > 0) { scenario = "form"; break; }
-      await sleep(1200, 1800);
+      if (await isDelivered()) { scenario = "attach"; break; }
+      // крайний признак: кнопка отклика исчезла, а формы нет — клик отправил отклик. Не раньше
+      // нескольких итераций, чтобы не спутать с ещё не отрисованной формой.
+      if (i >= 4 && await this.page.locator(SEL.respond).count() === 0) { scenario = "attach"; break; }
+      await sleep(700, 1200);
     }
 
     if (scenario === "attach") {
-      // Отклик уже отправлен самим кликом — прикладываем письмо best-effort.
-      // Даже если приложить не удалось, отклик засчитан: возвращаем "applied", иначе
-      // пайплайн пометит вакансию failed и собьёт учёт дневного лимита.
+      // Отклик уже отправлен самим кликом — прикладываем письмо best-effort (если hh дал кнопку).
+      // Отклик засчитан в любом случае → "applied", иначе пайплайн пометит failed и собьёт лимит.
       try {
         const attach = this.page.locator(SEL.attachLetter);
-        if (await attach.count() > 0) {                        // hh предложил приложить письмо
+        if (await attach.count() > 0) {
           await attach.click();
           await sleep(800, 1500);
-          const dialog = this.page.getByRole("dialog");        // textarea письма ищем в попапе, а не случайный на странице
+          const dialog = this.page.getByRole("dialog");        // textarea письма ищем в попапе
           const box = (await dialog.count() > 0 ? dialog : this.page).locator("textarea").first();
           await box.waitFor({ state: "visible", timeout: 8000 });
-          await box.pressSequentially(letter, { delay: jitter(15, 60) });
+          await box.fill(letter);                              // fill(), не посимвольно: длинное письмо иначе висит
+          await sleep(400, 900);
           await this.page.locator(SEL.letterPopupSubmit).click();
           await sleep(1500, 3000);
           await this.guard();
@@ -154,17 +163,18 @@ export class HhBrowser {
       const input = this.page.locator(SEL.letterInput);
       // Живой отклик без поля письма — не отправляем «пустой» отклик (fail-closed).
       if (await input.count() === 0) return "no_button";
-      await input.pressSequentially(letter, { delay: jitter(15, 60) });
+      await input.fill(letter);
+      await sleep(400, 900);
       await this.page.locator(SEL.submit).click();
       await sleep(1500, 3000);
       await this.guard();
       return "applied";
     }
 
-    // Сценарий не распознан. Возможно, клик всё же отправил отклик — проверяем текстом,
-    // чтобы не сбить дневной лимит (иначе fail-closed: считаем, что отклик не ушёл).
-    const bodyText = await this.page.locator("body").innerText().catch(() => "");
-    if (/Резюме доставлено|Резюме отправлено|Вы откликнулись|Отклик доставлен|Отклик отправлен|Ваш отклик|Вы уже откликались/i.test(bodyText)) return "applied";
+    // Не распознали сценарий. Если есть признаки отправки или кнопка отклика исчезла — считаем
+    // applied (для аккаунта с одним резюме клик почти всегда = отправка; лучше не недосчитать лимит).
+    if (await isDelivered()) return "applied";
+    if (await this.page.locator(SEL.respond).count() === 0) return "applied";
     return "no_button";
   }
 
