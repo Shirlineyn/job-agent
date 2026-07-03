@@ -27,7 +27,7 @@ export async function scoreVacancy(
 ): Promise<ScoreResult> {
   const user = `<резюме>\n${resume}\n</резюме>\n<вакансия>\n${vacancyText}\n</вакансия>\nЗарплатные ожидания: ${cfg.filters.salaryMin}+ руб на руки.`;
   const ask = (extra: string) => claude(ctx, {
-    model: cfg.anthropicModel, system: SCORING_SYSTEM_V1, user: user + extra, temperature: 0.2, maxTokens: 1024, purpose: "scoring",
+    model: cfg.anthropicModel, system: SCORING_SYSTEM_V1, user: user + extra, maxTokens: 1024, purpose: "scoring",
   });
   try { return parseScore(await ask("")); }
   catch (e) {

@@ -21,12 +21,12 @@ export async function writeLetter(
   args: { resume: string; vacancyText: string; research: string; score: ScoreResult },
 ): Promise<string> {
   const user = `<резюме>\n${args.resume}\n</резюме>\n<вакансия>\n${args.vacancyText}\n</вакансия>\n<справка_о_компании>\n${args.research}\n</справка_о_компании>\n<сильные_пересечения>\n${args.score.reasons.join("\n")}\n</сильные_пересечения>`;
-  const letter = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V1, user, temperature: 0.6, maxTokens: 1024, purpose: "letter" })).trim();
+  const letter = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V1, user, maxTokens: 1024, purpose: "letter" })).trim();
   const check = validateLetter(letter);
   if (!check.ok) {
     const retry = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V1,
       user: user + `\nПредыдущее письмо отклонено проверкой: ${check.problems.join("; ")}. Исправь и верни только текст письма.`,
-      temperature: 0.6, maxTokens: 1024, purpose: "letter" })).trim();
+      maxTokens: 1024, purpose: "letter" })).trim();
     const check2 = validateLetter(retry);
     if (!check2.ok) throw new Error(`letter failed validation twice: ${check2.problems.join("; ")}`);
     return retry;
