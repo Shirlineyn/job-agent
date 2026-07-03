@@ -15,6 +15,12 @@ const SEL = {
   letterToggle: '[data-qa="vacancy-response-letter-toggle"]',
   letterInput: '[data-qa="vacancy-response-popup-form-letter-input"]',
   submit: '[data-qa="vacancy-response-submit-popup"]',
+  // Вакансия БЕЗ анкеты: клик «Откликнуться» сразу отправляет отклик («Резюме доставлено»),
+  // а письмо прикладывается ПОСЛЕ — через отдельную кнопку и свой попап со своим submit.
+  attachLetter: '[data-qa="responded-success-attach-cover-letter"]',
+  letterPopupSubmit: '[data-qa="vacancy-response-letter-submit"]',
+  // «Резюме доставлено»: ссылка «Чат» есть даже когда кнопки приложить письмо нет — надёжный признак отправки.
+  deliveredChat: '[data-qa="vacancy-response-link-view-topic"]',
 };
 
 export class HhBrowser {
@@ -92,27 +98,74 @@ export class HhBrowser {
     if (dryRun) return "dry_run";
     await btn.click();
     await sleep(1500, 3500);
-    await this.guard();
-    // Возможен экран "отклик в другой стране/регионе" — подтверждаем, если появился
-    const relocate = this.page.locator('[data-qa="relocation-warning-confirm"]');
-    if (await relocate.count() > 0) { await relocate.click(); await sleep(1000, 2000); }
-    // Анкета работодателя, если есть: извлекаем вопросы, отвечаем через колбэк (LLM в пайплайне), заполняем.
-    if (answerFn && await this.hasQuestionnaire()) {
-      const questions = await this.extractQuestionnaire();
-      const answers = await answerFn(questions);
-      await this.fillQuestionnaire(answers, questions);
-      await sleep(800, 1500);
+
+    // После клика по «Откликнуться» hh ведёт себя двояко:
+    //  • attach — вакансия БЕЗ анкеты: клик УЖЕ отправил отклик («Резюме доставлено»),
+    //             письмо прикладывается после через «Приложить сопроводительное письмо».
+    //  • form   — форма отклика с анкетой и/или полем письма; submit отдельный (не отправлено).
+    // Определяем сценарий, попутно проходя релокейт-подтверждение. attach проверяем ПЕРВЫМ:
+    // его наличие однозначно значит «отклик уже ушёл» — в этом случае форменную ветку не трогаем.
+    let scenario: "attach" | "form" | "unknown" = "unknown";
+    for (let i = 0; i < 8; i++) {
+      await this.guard();
+      const relocate = this.page.locator('[data-qa="relocation-warning-confirm"]');
+      if (await relocate.count() > 0) { await relocate.click(); await sleep(1000, 2000); continue; }
+      // отклик уже доставлен? кнопка «приложить письмо» ИЛИ ссылка «Чат» из карточки «Резюме доставлено».
+      // Ловим отправку по надёжному data-qa (а не по тексту), иначе отправленный отклик уйдёт в no_button.
+      if (await this.page.locator(SEL.attachLetter).count() > 0
+          || await this.page.locator(SEL.deliveredChat).count() > 0) { scenario = "attach"; break; }
+      if (await this.hasQuestionnaire()
+          || await this.page.locator(SEL.letterToggle).count() > 0
+          || await this.page.locator(SEL.submit).count() > 0) { scenario = "form"; break; }
+      await sleep(1200, 1800);
     }
-    const toggle = this.page.locator(SEL.letterToggle);
-    if (await toggle.count() > 0) { await toggle.click(); await sleep(500, 1500); }
-    const input = this.page.locator(SEL.letterInput);
-    // Живой отклик без поля письма — не отправляем «пустой» отклик (fail-closed).
-    if (await input.count() === 0) return "no_button";
-    await input.pressSequentially(letter, { delay: jitter(15, 60) });
-    await this.page.locator(SEL.submit).click();
-    await sleep(1500, 3000);
-    await this.guard();
-    return "applied";
+
+    if (scenario === "attach") {
+      // Отклик уже отправлен самим кликом — прикладываем письмо best-effort.
+      // Даже если приложить не удалось, отклик засчитан: возвращаем "applied", иначе
+      // пайплайн пометит вакансию failed и собьёт учёт дневного лимита.
+      try {
+        const attach = this.page.locator(SEL.attachLetter);
+        if (await attach.count() > 0) {                        // hh предложил приложить письмо
+          await attach.click();
+          await sleep(800, 1500);
+          const dialog = this.page.getByRole("dialog");        // textarea письма ищем в попапе, а не случайный на странице
+          const box = (await dialog.count() > 0 ? dialog : this.page).locator("textarea").first();
+          await box.waitFor({ state: "visible", timeout: 8000 });
+          await box.pressSequentially(letter, { delay: jitter(15, 60) });
+          await this.page.locator(SEL.letterPopupSubmit).click();
+          await sleep(1500, 3000);
+          await this.guard();
+        }
+      } catch { /* отклик уже ушёл; приложение письма — best-effort, не роняем "applied" */ }
+      return "applied";
+    }
+
+    if (scenario === "form") {
+      // Анкета работодателя, если есть: извлекаем вопросы, отвечаем через колбэк (LLM в пайплайне), заполняем.
+      if (answerFn && await this.hasQuestionnaire()) {
+        const questions = await this.extractQuestionnaire();
+        const answers = await answerFn(questions);
+        await this.fillQuestionnaire(answers, questions);
+        await sleep(800, 1500);
+      }
+      const toggle = this.page.locator(SEL.letterToggle);
+      if (await toggle.count() > 0) { await toggle.click(); await sleep(500, 1500); }
+      const input = this.page.locator(SEL.letterInput);
+      // Живой отклик без поля письма — не отправляем «пустой» отклик (fail-closed).
+      if (await input.count() === 0) return "no_button";
+      await input.pressSequentially(letter, { delay: jitter(15, 60) });
+      await this.page.locator(SEL.submit).click();
+      await sleep(1500, 3000);
+      await this.guard();
+      return "applied";
+    }
+
+    // Сценарий не распознан. Возможно, клик всё же отправил отклик — проверяем текстом,
+    // чтобы не сбить дневной лимит (иначе fail-closed: считаем, что отклик не ушёл).
+    const bodyText = await this.page.locator("body").innerText().catch(() => "");
+    if (/Резюме доставлено|Резюме отправлено|Вы откликнулись|Отклик доставлен|Отклик отправлен|Ваш отклик|Вы уже откликались/i.test(bodyText)) return "applied";
+    return "no_button";
   }
 
   async waitCaptchaCleared(timeoutMs: number): Promise<boolean> {

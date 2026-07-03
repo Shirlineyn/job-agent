@@ -53,6 +53,23 @@ async function main() {
     if (await relocate.count() > 0) { console.log("[qn] релокейт-подтверждение — жму."); await relocate.click(); }
   }
 
+  // --- FLOW-1 (без анкеты): клик отклика УЖЕ отправил отклик, письмо прикладывается после ---
+  // Скрипт НЕ жмёт submit сам (контракт probe). Показываем письмо для ручной вставки.
+  if (await page.locator('[data-qa="responded-success-attach-cover-letter"]').count() > 0) {
+    console.log("\n[qn] ⚠⚠ ВАКАНСИЯ БЕЗ АНКЕТЫ: клик «Откликнуться» уже ОТПРАВИЛ отклик (hh, одно резюме).");
+    console.log("[qn] Отклик отправлен. Письмо СКРИПТ не прикладывает (контракт: не жму submit).");
+    const score = await scoreVacancy(ctx, callClaude, cfg, resume, vacancyText);
+    let research = "";
+    try { research = await researchCompany(ctx, callPerplexity, cfg, employer.trim(), employer.trim()); }
+    catch (e) { console.log("[qn] рисёрч упал (", String(e).slice(0, 60), ") — письмо без справки."); }
+    const letter = await writeLetter(ctx, callClaude, cfg, { resume, vacancyText, research, score });
+    console.log("\n[qn] === ПИСЬМО (вставь вручную через «Приложить сопроводительное письмо») ===\n" + letter + "\n");
+    console.log("[qn] Окно открыто 60с для ручных действий.");
+    await new Promise(r => setTimeout(r, 60_000));
+    await browser.close();
+    return;
+  }
+
   // --- АНКЕТА (если есть) ---
   if (await browser.hasQuestionnaire()) {
     const questions = await browser.extractQuestionnaire();
