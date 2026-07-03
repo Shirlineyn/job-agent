@@ -168,7 +168,14 @@ export class HhBrowser {
       await this.page.locator(SEL.submit).click();
       await sleep(1500, 3000);
       await this.guard();
-      return "applied";
+      // hh создаёт отклик только при ПОЛНОСТЬЮ заполненной анкете; при пустом обязательном поле
+      // submit молча не срабатывает и форма остаётся. Убеждаемся, что отклик реально доставлен,
+      // иначе — no_button (а не ложный applied, как было с пустым зарплатным полем Почты).
+      for (let i = 0; i < 6; i++) {
+        if (await isDelivered()) return "applied";
+        await sleep(700, 1200);
+      }
+      return "no_button";
     }
 
     // Не распознали сценарий. Если есть признаки отправки или кнопка отклика исчезла — считаем
