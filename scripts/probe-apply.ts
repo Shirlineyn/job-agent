@@ -1,14 +1,9 @@
-// Supervised inspection of the hh.ru apply form + any employer questionnaire.
+// Supervised, multi-step inspection of the hh.ru apply flow: respond → (region/relocation
+// menu, auto-passed, no AI) → letter form + employer questionnaire (анкета). Captures the
+// real DOM at every step to tmp/apply-step{N}.html so we build handlers against real markup.
+// The final submit is NEVER clicked.
+//
 // Run: npx tsx scripts/probe-apply.ts "https://hh.ru/vacancy/XXXXXXXX"
-//
-// ⚠️ ВНИМАНИЕ: скрипт КЛИКАЕТ «Откликнуться». На аккаунте с одним резюме hh может
-// по этому клику СРАЗУ отправить отклик (необратимо). Скрипт сам submit НЕ жмёт, но
-// за риск клика отвечает запускающий. Запускай под присмотром, на вакансии, на которую
-// НЕ жалко откликнуться. Ничего не отправляет специально; дампит разметку формы в tmp/.
-//
-// Цель: снять реальную разметку формы отклика (letterToggle/letterInput/submit) и
-// увидеть, как выглядит дополнительный опросник работодателя — чтобы строить обработчик
-// опросника против настоящего DOM, а не угадывать селекторы.
 import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +14,37 @@ const url = process.argv[2];
 if (!url || !/hh\.ru\/vacancy\/\d+/.test(url)) {
   console.error('Укажи URL вакансии: npx tsx scripts/probe-apply.ts "https://hh.ru/vacancy/123456"');
   process.exit(2);
+}
+
+// Считаем всё из Node через локаторы + плоские $$eval (без page.evaluate с вложенными
+// именованными хелперами — иначе tsx/esbuild ломает контекст браузера через __name).
+async function snapshot(page: Page) {
+  const c = (sel: string) => page.locator(sel).count();
+  const [textarea, textInput, radio, checkbox, select, letterInput, letterToggle, submit] = await Promise.all([
+    c("textarea"), c("input[type='text'], input:not([type])"), c("input[type='radio']"),
+    c("input[type='checkbox']"), c("select"),
+    c('[data-qa="vacancy-response-popup-form-letter-input"]'),
+    c('[data-qa="vacancy-response-letter-toggle"]'),
+    c('[data-qa="vacancy-response-submit-popup"]'),
+  ]);
+  const dataQaRaw = await page.$$eval("[data-qa]", els => els.map(e => e.getAttribute("data-qa") || ""));
+  const dataQa = [...new Set(dataQaRaw.filter(v => /response|letter|task|question|test|cover|submit|popup|relocat|region|area|city|confirm/i.test(v)))].sort();
+  const labelsRaw = await page.$$eval("label, [data-qa*='question'], [data-qa*='task'], fieldset legend",
+    els => els.map(e => (e.textContent || "").replace(/\s+/g, " ").trim()));
+  const labels = [...new Set(labelsRaw.filter(t => t.length > 3 && t.length < 220))].slice(0, 40);
+  const btnsRaw = await page.$$eval("button, [role='button'], a[data-qa]",
+    els => els.map(e => ((e.textContent || "").replace(/\s+/g, " ").trim() + "\t" + (e.getAttribute("data-qa") || ""))));
+  const buttons = [...new Set(btnsRaw.map(x => { const [t, d] = x.split("\t"); return t && t.length < 40 ? (d ? `${t} [${d}]` : t) : ""; }).filter(Boolean))].slice(0, 25);
+  const bodyText = await page.locator("body").innerText().catch(() => "");
+  return {
+    url: page.url(), textarea, textInput, radio, checkbox, select, letterInput, letterToggle, submit,
+    alreadyApplied: /Вы откликнулись|Отклик доставлен|Резюме отправлено|Вы уже откликались/i.test(bodyText),
+    dataQa, buttons, labels,
+  };
+}
+
+function reachedForm(s: Awaited<ReturnType<typeof snapshot>>): boolean {
+  return s.letterInput > 0 || s.textarea > 0 || s.radio > 0 || s.select > 0;
 }
 
 async function main() {
@@ -34,53 +60,35 @@ async function main() {
   console.log("[probe-apply] isLoggedOut:", await browser.isLoggedOut(), "| isCaptcha:", await browser.isCaptcha());
 
   const respond = page.locator('[data-qa="vacancy-response-link-top"]').first();
-  const respondCount = await respond.count();
-  console.log("[probe-apply] кнопка отклика найдена:", respondCount > 0);
-  if (respondCount === 0) { console.log("[probe-apply] нет кнопки — уже откликались или отклик недоступен. Выхожу без клика."); await browser.close(); return; }
-
-  console.log("[probe-apply] КЛИКАЮ «Откликнуться» (submit НЕ нажимаю)…");
+  if (await respond.count() === 0) { console.log("[probe-apply] нет кнопки отклика — уже откликались/недоступно. Выхожу."); await browser.close(); return; }
+  console.log("[probe-apply] КЛИКАЮ «Откликнуться» (финальный submit НЕ нажимаю)…");
   await respond.click();
-  await new Promise(r => setTimeout(r, 3500));
-  console.log("[probe-apply] после клика: isLoggedOut:", await browser.isLoggedOut(), "| isCaptcha:", await browser.isCaptcha());
-  console.log("[probe-apply] URL сейчас:", page.url());
 
-  // Слепок структуры: типы полей + все data-qa, релевантные форме/опроснику.
-  const info = await page.evaluate(() => {
-    const q = (sel: string) => document.querySelectorAll(sel).length;
-    const dq = new Set<string>();
-    document.querySelectorAll<HTMLElement>("[data-qa]").forEach(el => {
-      const v = el.getAttribute("data-qa") || "";
-      if (/response|letter|task|question|test|cover|submit|popup|relocat/i.test(v)) dq.add(v);
-    });
-    // «вопросы»: подписи/лейблы рядом с полями ввода в модалке отклика
-    const labels: string[] = [];
-    document.querySelectorAll<HTMLElement>("label, [data-qa*='question'], [data-qa*='task']").forEach(el => {
-      const t = (el.textContent || "").trim().replace(/\s+/g, " ");
-      if (t && t.length > 3 && t.length < 200) labels.push(t);
-    });
-    return {
-      textareas: q("textarea"),
-      textInputs: q("input[type='text'], input:not([type])"),
-      radios: q("input[type='radio']"),
-      checkboxes: q("input[type='checkbox']"),
-      selects: q("select"),
-      letterInput: q('[data-qa="vacancy-response-popup-form-letter-input"]'),
-      letterToggle: q('[data-qa="vacancy-response-letter-toggle"]'),
-      submitBtn: q('[data-qa="vacancy-response-submit-popup"]'),
-      alreadyApplied: /Вы откликнулись|Отклик доставлен|Резюме отправлено|Вы уже откликались/i.test(document.body.innerText),
-      dataQa: [...dq].sort(),
-      labels: labels.slice(0, 40),
-    };
-  });
-  console.log("\n[probe-apply] === СОСТОЯНИЕ ФОРМЫ ===");
-  console.log(JSON.stringify(info, null, 2));
-  if (info.alreadyApplied) console.log("\n⚠️ ПОХОЖЕ, ОТКЛИК УЖЕ ОТПРАВЛЕН по клику (см. alreadyApplied=true) — учти это.");
-  if (info.letterInput === 0 && info.textareas === 0) console.log("[probe-apply] поля письма не видно — возможно, отклик ушёл сразу, либо форма в отдельном роуте.");
-  if (info.textareas + info.radios + info.checkboxes + info.selects > (info.letterInput || 0)) console.log("[probe-apply] похоже на ОПРОСНИК: есть поля помимо письма (см. labels/типы выше).");
+  for (let step = 1; step <= 4; step++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const s = await snapshot(page);
+    await writeFile(join(outDir, `apply-step${step}.html`), await page.content(), "utf-8");
+    console.log(`\n[probe-apply] ─── ШАГ ${step} ───`);
+    console.log(JSON.stringify(s, null, 2));
+    if (s.alreadyApplied) { console.log("⚠️ отклик, похоже, уже отправлен."); break; }
+    if (reachedForm(s)) { console.log(`[probe-apply] дошли до формы/анкеты (шаг ${step}) — снимаю и останавливаюсь ДО submit.`); break; }
 
-  const html = await page.content();
-  await writeFile(join(outDir, "apply-page.html"), html, "utf-8");
-  console.log("\n[probe-apply] полный HTML сохранён → tmp/apply-page.html (для разбора селекторов). SUBMIT не нажимался.");
+    const relocate = page.locator('[data-qa="relocation-warning-confirm"]');
+    if (await relocate.count() > 0) { console.log("[probe-apply] relocation confirm найден — жму."); await relocate.click(); continue; }
+    const advance = page.locator('button:visible, [role="button"]:visible').filter({ hasText: /продолжить|далее|подтвердить|выбрать|откликнуться/i });
+    const n = await advance.count();
+    let clicked = false;
+    for (let i = 0; i < n; i++) {
+      const el = advance.nth(i);
+      const dq = await el.getAttribute("data-qa");
+      if (dq && dq.includes("submit-popup")) continue;   // финальный submit — не жмём
+      console.log(`[probe-apply] жму advance: «${(await el.textContent())?.trim()}» [${dq ?? "no-dqa"}]`);
+      await el.click(); clicked = true; break;
+    }
+    if (!clicked) { console.log("[probe-apply] нет кнопки прохода дальше — стоп на текущем шаге."); break; }
+  }
+
+  console.log("\n[probe-apply] снимки → tmp/apply-step*.html. Финальный submit НЕ нажимался.");
   await browser.close();
 }
 
