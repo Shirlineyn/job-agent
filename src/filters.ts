@@ -10,7 +10,7 @@ export function applyHardFilters(v: VacancyInsert, f: Config["filters"], blackli
   if (cap === null) {
     if (!f.allowUnknownSalary) return { pass: false, reason: "salary_unknown" };
   } else if (cap < f.salaryMin) return { pass: false, reason: "salary_below_min" };
-  if (v.work_format && !f.workFormats.includes(v.work_format)) return { pass: false, reason: "work_format" };
+  if (!f.workFormats.includes(v.work_format ?? "unknown")) return { pass: false, reason: "work_format" };
   if (v.experience && !f.maxExperience.includes(v.experience)) return { pass: false, reason: "experience_mismatch" };
   if (v.published_at) {
     const ageDays = (Date.now() - Date.parse(v.published_at)) / 86_400_000;

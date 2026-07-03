@@ -26,4 +26,12 @@ describe("hard filters", () => {
     const r = applyHardFilters({ ...base, experience: "moreThan6" }, { ...f }, []);
     expect(r).toEqual({ pass: false, reason: "experience_mismatch" });
   });
+  it("treats null work_format as unknown and rejects it when unknown is not allowed", () => {
+    const r = applyHardFilters({ ...base, work_format: null }, { ...f, workFormats: ["remote"] }, []);
+    expect(r).toEqual({ pass: false, reason: "work_format" });
+  });
+  it("passes null work_format when unknown is allowed", () => {
+    const r = applyHardFilters({ ...base, work_format: null }, { ...f, workFormats: ["remote", "unknown"] }, []);
+    expect(r.pass).toBe(true);
+  });
 });
