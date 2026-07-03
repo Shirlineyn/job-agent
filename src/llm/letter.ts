@@ -1,4 +1,4 @@
-import { LETTER_SYSTEM_V1 } from "./prompts.js";
+import { LETTER_SYSTEM_V2 } from "./prompts.js";
 import type { callClaude } from "./anthropic.js";
 import type { LlmLogCtx } from "./log.js";
 import type { Config } from "../config.js";
@@ -21,10 +21,10 @@ export async function writeLetter(
   args: { resume: string; vacancyText: string; research: string; score: ScoreResult },
 ): Promise<string> {
   const user = `<резюме>\n${args.resume}\n</резюме>\n<вакансия>\n${args.vacancyText}\n</вакансия>\n<справка_о_компании>\n${args.research}\n</справка_о_компании>\n<сильные_пересечения>\n${args.score.reasons.join("\n")}\n</сильные_пересечения>`;
-  const letter = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V1, user, maxTokens: 1024, purpose: "letter" })).trim();
+  const letter = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V2, user, maxTokens: 1024, purpose: "letter" })).trim();
   const check = validateLetter(letter);
   if (!check.ok) {
-    const retry = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V1,
+    const retry = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V2,
       user: user + `\nПредыдущее письмо отклонено проверкой: ${check.problems.join("; ")}. Исправь и верни только текст письма.`,
       maxTokens: 1024, purpose: "letter" })).trim();
     const check2 = validateLetter(retry);
