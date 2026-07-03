@@ -60,7 +60,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         s.scored++;
         repo.setStatus(db, v.id, score.score >= cfg.scoreThreshold ? "queued" : "skipped",
           { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify({ text }) });
-      } catch { s.errors++; if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } repo.setStatus(db, v.id, "failed"); }
+      } catch { s.errors++; repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
 
@@ -78,7 +78,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         if (result === "skip" || result === "no_button") { repo.setStatus(db, v.id, "failed"); continue; }
         if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; await sleep(...cfg.applyPauseMs); }
         // result === "dry_run": остаётся queued с готовым письмом
-      } catch { s.errors++; if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
+      } catch { s.errors++; repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
 

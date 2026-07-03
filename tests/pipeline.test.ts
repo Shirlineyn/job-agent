@@ -53,4 +53,11 @@ describe("runSession", () => {
     expect(s.applied).toBe(0);
     expect(repo.getByStatus(d.db, "skipped").length).toBe(2);
   });
+  it("marks vacancy failed when scoring errors", async () => {
+    const d = deps({ claude: vi.fn(async () => { throw new Error("api down"); }) as never });
+    const s = await runSession(d, "manual", "live");
+    expect(s.errors).toBeGreaterThan(0);
+    expect(repo.getByStatus(d.db, "failed").length).toBe(2);
+    expect(repo.getByStatus(d.db, "discovered").length).toBe(0);
+  });
 });
