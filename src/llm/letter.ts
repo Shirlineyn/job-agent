@@ -11,7 +11,7 @@ export function validateLetter(text: string): { ok: boolean; problems: string[] 
   const words = text.trim().split(/\s+/).length;
   if (words < 100 || words > 220) problems.push(`word count ${words}, expected 120-180`);
   for (const m of text.matchAll(/https?:\/\/([^\s/]+)/g))
-    if (!URL_WHITELIST.some(d => m[1].endsWith(d))) problems.push(`foreign url: ${m[1]}`);
+    if (!URL_WHITELIST.some(d => m[1] === d || m[1].endsWith("." + d))) problems.push(`foreign url: ${m[1]}`);
   if (!text.includes("Доронин")) problems.push("no signature");
   return { ok: problems.length === 0, problems };
 }

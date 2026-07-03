@@ -17,4 +17,7 @@ describe("validateLetter", () => {
   it("allows whitelisted urls", () => {
     expect(validateLetter(ok + " https://tedo.ru/insights/gartner-hype-cycle").ok).toBe(true);
   });
+  it("rejects lookalike domains", () => {
+    expect(validateLetter(ok + " http://eviltedo.ru/x").ok).toBe(false);
+  });
 });
