@@ -56,6 +56,13 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     if (found === "skip") continue;
     for (const card of found) if (repo.upsertVacancy(db, card)) s.discovered++;
   }
+  // hh-рекомендации: пустой запрос + дефолтный (релевантный/персональный под резюме) порядок —
+  // свежие И релевантные; на практике основной источник (keyword-поиск даёт мало нового). Только
+  // если discover ещё не остановился по капче/разлогину.
+  if (s.stopReason === "completed") {
+    const rec = await guarded(() => deps.browser.searchVacancies("", cfg.area, "default"));
+    if (rec !== "stop" && rec !== "skip") for (const card of rec) if (repo.upsertVacancy(db, card)) s.discovered++;
+  }
 
   // 2) filter + score
   if (s.stopReason === "completed") {
