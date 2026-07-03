@@ -214,23 +214,24 @@ export class HhBrowser {
     // (открытое поле / «Свой вариант», name=task_NNN_text). Плоские стрелки — иначе esbuild
     // ломает named-функции в browser-контексте (__name is not defined).
     const items = await this.page.$$eval(
-      '[data-qa="task-question"], input[type="radio"], textarea',
+      '[data-qa="task-question"], input[type="radio"], input[type="checkbox"], textarea',
       els => els.map(e =>
         e.matches('[data-qa="task-question"]')
           ? { kind: "q", name: "", value: "", text: (e.textContent || "").replace(/\s+/g, " ").trim() }
           : e.tagName === "TEXTAREA"
             ? { kind: "textarea", name: e.getAttribute("name") || "", value: "", text: "" }
-            : { kind: "radio", name: e.getAttribute("name") || "", value: (e as HTMLInputElement).value, text: (e.closest("label")?.textContent || "").replace(/\s+/g, " ").trim() }
+            : { kind: (e as HTMLInputElement).type === "checkbox" ? "checkbox" : "radio", name: e.getAttribute("name") || "", value: (e as HTMLInputElement).value, text: (e.closest("label")?.textContent || "").replace(/\s+/g, " ").trim() }
       ),
     );
-    // Каждый вопрос набирает свои radio/textarea до следующего вопроса. Берём только name=task_*,
-    // иначе поле сопроводительного письма (другой name) прилипло бы к последнему вопросу.
+    // Каждый вопрос набирает свои radio/checkbox/textarea до следующего вопроса. Берём только
+    // name=task_*, иначе поле сопроводительного письма (другой name) прилипло бы к последнему вопросу.
     const questions: QuestionnaireItem[] = [];
     let cur: QuestionnaireItem | null = null;
     for (const it of items) {
-      if (it.kind === "q") { cur = { name: "", question: it.text, options: [], textName: null }; questions.push(cur); continue; }
+      if (it.kind === "q") { cur = { name: "", question: it.text, options: [], textName: null, multi: false }; questions.push(cur); continue; }
       if (!cur || !it.name.startsWith("task_")) continue;
       if (it.kind === "radio") { cur.name = it.name; cur.options.push({ value: it.value, text: it.text }); }
+      else if (it.kind === "checkbox") { cur.name = it.name; cur.multi = true; cur.options.push({ value: it.value, text: it.text }); }
       else if (it.kind === "textarea") { cur.textName = it.name; }
     }
     return questions;
@@ -241,8 +242,10 @@ export class HhBrowser {
     for (const a of answers) {
       const q = questions[a.i];
       if (!q) continue;
-      if (a.type === "option" && a.value) {
-        await this.page.locator(`input[name="${q.name}"][value="${a.value}"]`).check({ force: true });
+      if (a.type === "option") {
+        // radio → одно value; чекбоксы → массив values. check() отмечает и radio, и checkbox.
+        const vals = (a.values && a.values.length) ? a.values : (a.value ? [a.value] : []);
+        for (const val of vals) await this.page.locator(`input[name="${q.name}"][value="${val}"]`).check({ force: true });
       } else if (a.type === "custom") {
         // radio-вопрос со «Свой вариант»: сначала выбрать последний radio. У открытого вопроса radio нет.
         if (q.options.length > 0) {
