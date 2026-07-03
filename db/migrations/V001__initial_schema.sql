@@ -53,7 +53,7 @@ CREATE TABLE llm_calls (
     vacancy_id    TEXT REFERENCES vacancies(id) ON DELETE SET NULL,
     run_id        INTEGER REFERENCES runs(id) ON DELETE SET NULL,
     provider      TEXT NOT NULL CHECK (provider IN ('anthropic', 'perplexity')),
-    purpose       TEXT NOT NULL CHECK (purpose IN ('scoring', 'research', 'letter')), -- scoring | research | letter
+    purpose       TEXT NOT NULL CHECK (purpose IN ('scoring', 'research', 'letter')),
     model         TEXT NOT NULL,
     request       TEXT NOT NULL,                 -- полный JSON запроса
     response      TEXT,                          -- полный JSON ответа (NULL при ошибке)
