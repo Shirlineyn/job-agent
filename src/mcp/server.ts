@@ -7,6 +7,7 @@ import type { Database } from "better-sqlite3";
 import * as repo from "../state/repo.js";
 import { loadConfig, saveConfig, ConfigSchema } from "../config.js";
 import { runSession, type Deps } from "../pipeline/run.js";
+import { tryAcquireRunLock, releaseRunLock } from "../run-lock.js";
 
 const j = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
@@ -19,8 +20,11 @@ export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number
       queued: repo.getByStatus(db, "queued").length, threshold: cfg.scoreThreshold });
   });
   mcp.tool("run_now", "Запустить сессию сейчас", { mode: z.enum(["live", "dry_run"]).optional() }, async ({ mode }) => {
-    const deps = await mkDeps();
-    return j(await runSession(deps, "manual", mode));
+    if (!tryAcquireRunLock()) return j({ error: "session already running" });
+    try {
+      const deps = await mkDeps();
+      return j(await runSession(deps, "manual", mode));
+    } finally { releaseRunLock(); }
   });
   mcp.tool("pause", "Поставить автопилот на паузу", {}, async () => { saveConfig({ ...loadConfig(), paused: true }); return j({ paused: true }); });
   mcp.tool("resume", "Снять с паузы", {}, async () => { saveConfig({ ...loadConfig(), paused: false }); return j({ paused: false }); });

@@ -19,12 +19,16 @@ const SEL = {
 export class HhBrowser {
   private ctx!: BrowserContext;
   private page!: Page;
+  private closed = false;
 
   async launch(profileDir: string): Promise<void> {
     this.ctx = await chromium.launchPersistentContext(profileDir, { headless: false, viewport: null });
+    this.ctx.on("close", () => { this.closed = true; });
     this.page = this.ctx.pages()[0] ?? await this.ctx.newPage();
   }
   async close(): Promise<void> { await this.ctx.close(); }
+
+  isAlive(): boolean { return !this.closed && this.ctx !== undefined; }
 
   async isCaptcha(): Promise<boolean> {
     return this.page.url().includes("captcha") || await this.page.locator(SEL.captcha).count() > 0;
