@@ -60,4 +60,12 @@ describe("runSession", () => {
     expect(repo.getByStatus(d.db, "failed").length).toBe(2);
     expect(repo.getByStatus(d.db, "discovered").length).toBe(0);
   });
+  it("keeps vacancy queued on transient research error (retry next session)", async () => {
+    const d = deps({ pplx: vi.fn(async () => { throw Object.assign(new Error("perplexity 403 forbidden"), { status: 403 }); }) as never });
+    const s = await runSession(d, "manual", "live");
+    expect(s.errors).toBeGreaterThan(0);
+    expect(repo.getByStatus(d.db, "queued").length).toBe(2); // остались на повтор, не failed
+    expect(repo.getByStatus(d.db, "failed").length).toBe(0);
+    expect(s.applied).toBe(0);
+  });
 });

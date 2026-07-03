@@ -11,6 +11,16 @@ import type { Config } from "../config.js";
 import type { callClaude } from "../llm/anthropic.js";
 import type { callPerplexity } from "../llm/perplexity.js";
 
+// Транзиентный сбой (API-хиккап: Perplexity/Anthropic 403/408/429/5xx, timeout, сеть)
+// стоит повторить в СЛЕДУЮЩЕЙ сессии, а не помечать вакансию failed навсегда. Контентные
+// ошибки (письмо не прошло валидацию дважды, невалидный JSON скоринга) — не транзиентные.
+function isTransient(e: unknown): boolean {
+  const msg = String(e);
+  if (/letter failed validation|InvalidScoreJson|no json object/i.test(msg)) return false;
+  return /(?:^|\D)(403|408|429|5\d\d)(?:\D|$)/.test(msg)
+    || /timeout|timed out|ECONN|socket hang|network|fetch failed|aborted/i.test(msg);
+}
+
 export type BrowserPort = Pick<HhBrowser, "searchVacancies" | "fetchVacancyText" | "apply" | "waitCaptchaCleared">;
 export type Deps = { db: Database; cfg: Config; browser: BrowserPort; claude: typeof callClaude; pplx: typeof callPerplexity; notify: (msg: string) => void; resume: string };
 export type RunSummary = { runId: number; discovered: number; filteredOut: number; scored: number; applied: number; errors: number; stopReason: string };
@@ -60,7 +70,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         s.scored++;
         repo.setStatus(db, v.id, score.score >= cfg.scoreThreshold ? "queued" : "skipped",
           { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify({ text }) });
-      } catch { s.errors++; repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
+      } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
 
@@ -85,7 +95,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         if (result === "stop") break;
         if (result === "skip" || result === "no_button") { repo.setStatus(db, v.id, "failed"); continue; }
         if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; await sleep(...cfg.applyPauseMs); }
-      } catch { s.errors++; repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
+      } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
 
