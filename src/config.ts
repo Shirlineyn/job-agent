@@ -1,5 +1,5 @@
 // src/config.ts
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -31,7 +31,8 @@ export const ConfigSchema = z.object({
       maxExperience: ["noExperience", "between1And3", "between3And6"],
     }),
   scoreThreshold: z.number().default(65),
-  dailyLimit: z.number().default(10),
+  // dailyLimit — главный предохранитель: целое 1..50, чтобы битый конфиг не открыл шлюз.
+  dailyLimit: z.number().int().min(1).max(50).default(10),
   schedule: z.array(z.string()).default(["0 10 * * *", "30 15 * * *"]),
   applyPauseMs: z.tuple([z.number(), z.number()]).default([180000, 420000]),
   anthropicModel: z.string().default("claude-sonnet-5"),
@@ -68,5 +69,10 @@ export function loadConfig(dir: string = defaultDir()): Config {
 
 export function saveConfig(cfg: Config, dir: string = defaultDir()): void {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(configPath(dir), JSON.stringify(cfg, null, 2));
+  // Атомарная запись (tmp + rename): краш посреди writeFileSync не оставит порванный
+  // config.json, который иначе валит каждый последующий loadConfig (и cron-цикл).
+  const path = configPath(dir);
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+  renameSync(tmp, path);
 }

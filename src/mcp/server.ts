@@ -8,10 +8,15 @@ import * as repo from "../state/repo.js";
 import { loadConfig, saveConfig, ConfigSchema } from "../config.js";
 import { runSession, type Deps } from "../pipeline/run.js";
 import { tryAcquireRunLock, releaseRunLock } from "../run-lock.js";
+import { notify } from "../notify.js";
 
 const j = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
-export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number): void {
+// A session runs 10+ minutes (dry-run) to 30-70 minutes (live). Holding the request
+// transport open that long breaks every other MCP call and outlives client timeouts,
+// so run_now is fire-and-forget: it kicks off the session and returns immediately;
+// progress is observed via status / get_report.
+function buildServer(db: Database, mkDeps: () => Promise<Deps>): McpServer {
   const mcp = new McpServer({ name: "hh-agent", version: "1.0.0" });
 
   mcp.tool("status", "Текущее состояние агента", {}, async () => {
@@ -19,12 +24,20 @@ export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number
     return j({ mode: cfg.mode, paused: cfg.paused, appliedToday: repo.appliedToday(db), dailyLimit: cfg.dailyLimit,
       queued: repo.getByStatus(db, "queued").length, threshold: cfg.scoreThreshold });
   });
-  mcp.tool("run_now", "Запустить сессию сейчас", { mode: z.enum(["live", "dry_run"]).optional() }, async ({ mode }) => {
+  mcp.tool("run_now", "Запустить сессию сейчас (асинхронно — следи за прогрессом через status/get_report)",
+    { mode: z.enum(["live", "dry_run"]).optional() }, async ({ mode }) => {
     if (!tryAcquireRunLock()) return j({ error: "session already running" });
     try {
       const deps = await mkDeps();
-      return j(await runSession(deps, "manual", mode));
-    } finally { releaseRunLock(); }
+      void runSession(deps, "manual", mode)
+        .then(s => notify(`hh-agent: сессия завершена — откликов ${s.applied}, ошибок ${s.errors} (${s.stopReason})`))
+        .catch(e => notify(`hh-agent: сессия упала: ${e}`))
+        .finally(releaseRunLock);
+      return j({ started: true, mode: mode ?? loadConfig().mode });
+    } catch (e) {
+      releaseRunLock();
+      return j({ error: String(e) });
+    }
   });
   mcp.tool("pause", "Поставить автопилот на паузу", {}, async () => { saveConfig({ ...loadConfig(), paused: true }); return j({ paused: true }); });
   mcp.tool("resume", "Снять с паузы", {}, async () => { saveConfig({ ...loadConfig(), paused: false }); return j({ paused: false }); });
@@ -33,7 +46,7 @@ export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number
   mcp.tool("get_queue", "Очередь на отклик со score и письмами", {}, async () =>
     j(repo.getByStatus(db, "queued").map(v => ({ id: v.id, title: v.title, employer: v.employer_name, score: v.score, letter: v.letter }))));
   mcp.tool("get_vacancy", "Вакансия целиком по id", { id: z.string() }, async ({ id }) => j(repo.getVacancy(db, id) ?? { error: "not found" }));
-  mcp.tool("set_filters", "Изменить конфиг (частичный патч)", { patch: z.record(z.string(), z.unknown()) }, async ({ patch }) => {
+  mcp.tool("set_filters", "Изменить конфиг (частичный патч; вложенный filters заменяется целиком)", { patch: z.record(z.string(), z.unknown()) }, async ({ patch }) => {
     const next = ConfigSchema.parse({ ...loadConfig(), ...patch });
     saveConfig(next); return j(next);
   });
@@ -42,11 +55,24 @@ export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number
   mcp.tool("blacklist_remove", "Убрать из чёрного списка", { pattern: z.string() },
     async ({ pattern }) => { repo.removeBlacklist(db, pattern); return j({ blacklist: repo.getBlacklist(db) }); });
 
+  return mcp;
+}
+
+export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number): void {
   const app = express();
   app.use(express.json());
+  // Fresh McpServer + transport per request: the SDK throws "Already connected to a
+  // transport" if one server is reused across concurrent open transports (a session
+  // held one open for the whole run). Origin/Host validation blocks DNS-rebinding —
+  // a browser page rebinding to 127.0.0.1 must not be able to call set_filters/run_now.
   app.all("/mcp", async (req, res) => {
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    res.on("close", () => transport.close());
+    const mcp = buildServer(db, mkDeps);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableDnsRebindingProtection: true,
+      allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
+    });
+    res.on("close", () => { transport.close(); void mcp.close(); });
     await mcp.connect(transport);
     await transport.handleRequest(req, res, req.body);
   });

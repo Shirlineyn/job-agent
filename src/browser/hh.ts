@@ -82,6 +82,10 @@ export class HhBrowser {
     await this.guard();
     const btn = this.page.locator(SEL.respond).first();
     if (await btn.count() === 0) return "no_button";     // уже откликались или отклик недоступен
+    // dry-run: останавливаемся ДО клика по «Откликнуться». На hh у аккаунтов с одним
+    // резюме клик по кнопке может сам отправить отклик — единственный надёжный рубеж
+    // это не нажимать её вовсе. Письмо уже лежит в БД и видно через get_queue.
+    if (dryRun) return "dry_run";
     await btn.click();
     await sleep(1500, 3500);
     await this.guard();
@@ -91,8 +95,9 @@ export class HhBrowser {
     const toggle = this.page.locator(SEL.letterToggle);
     if (await toggle.count() > 0) { await toggle.click(); await sleep(500, 1500); }
     const input = this.page.locator(SEL.letterInput);
-    if (await input.count() > 0) await input.pressSequentially(letter, { delay: jitter(15, 60) });
-    if (dryRun) return "dry_run";                         // всё сделали, кроме отправки
+    // Живой отклик без поля письма — не отправляем «пустой» отклик (fail-closed).
+    if (await input.count() === 0) return "no_button";
+    await input.pressSequentially(letter, { delay: jitter(15, 60) });
     await this.page.locator(SEL.submit).click();
     await sleep(1500, 3000);
     await this.guard();

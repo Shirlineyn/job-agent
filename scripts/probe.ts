@@ -6,7 +6,7 @@
 // LoggedOut) so we can still verify parsing against the public pages.
 // src/browser/hh.ts itself is left untouched — guard()/isLoggedOut()
 // behavior is not weakened there.
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Page } from "playwright";
@@ -50,6 +50,11 @@ async function main() {
   await browser.launch(profileDir);
   const page = (browser as unknown as { page: Page }).page;
 
+  // Fixtures go to tmp/ (git-ignored): once logged in, page.content() contains the
+  // authenticated header (name/contacts) — must never land in a tracked path.
+  const outDir = join(process.cwd(), "tmp");
+  await mkdir(outDir, { recursive: true });
+
   console.log("[probe] isLoggedOut():", await browser.isLoggedOut());
   console.log("[probe] isCaptcha():", await browser.isCaptcha());
 
@@ -66,8 +71,8 @@ async function main() {
   console.log(JSON.stringify(cards.slice(0, 3), null, 2));
 
   const searchHtml = await page.content();
-  await writeFile(join(process.cwd(), "tests/fixtures/search-page.html"), searchHtml, "utf-8");
-  console.log("[probe] saved tests/fixtures/search-page.html");
+  await writeFile(join(outDir, "search-page.html"), searchHtml, "utf-8");
+  console.log("[probe] saved tmp/search-page.html");
 
   if (cards.length > 0) {
     const first = cards[0];
@@ -87,8 +92,8 @@ async function main() {
     console.log(text.slice(0, 500));
 
     const vacancyHtml = await page.content();
-    await writeFile(join(process.cwd(), "tests/fixtures/vacancy-page.html"), vacancyHtml, "utf-8");
-    console.log("[probe] saved tests/fixtures/vacancy-page.html");
+    await writeFile(join(outDir, "vacancy-page.html"), vacancyHtml, "utf-8");
+    console.log("[probe] saved tmp/vacancy-page.html");
   } else {
     console.log("[probe] no cards found — skipping fetchVacancyText.");
   }

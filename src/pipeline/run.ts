@@ -69,15 +69,22 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     for (const v of repo.getByStatus(db, "queued").sort(() => Math.random() - 0.5)) {
       if (repo.appliedToday(db) >= cfg.dailyLimit) { s.stopReason = "daily_limit"; break; }
       try {
-        const research = await researchCompany(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name);
-        const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
-        const letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") });
-        repo.setStatus(db, v.id, "queued", { letter });
-        const result = await guarded(() => deps.browser.apply(v.url, letter, mode === "dry_run"));
+        // Письмо генерируем только один раз: если оно уже есть (прошлая dry-run сессия),
+        // не переписываем — иначе жжём LLM-бюджет и затираем уже проверенный пользователем текст.
+        let letter = v.letter;
+        if (!letter) {
+          const research = await researchCompany(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name);
+          const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
+          letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") });
+          repo.setStatus(db, v.id, "queued", { letter });
+        }
+        // dry-run: письмо сохранено, браузер не трогаем (повторная навигация по одним
+        // и тем же вакансиям каждую сессию — заметный анти-бот паттерн, а проверка не нужна).
+        if (mode === "dry_run") continue;
+        const result = await guarded(() => deps.browser.apply(v.url, letter, false));
         if (result === "stop") break;
         if (result === "skip" || result === "no_button") { repo.setStatus(db, v.id, "failed"); continue; }
         if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; await sleep(...cfg.applyPauseMs); }
-        // result === "dry_run": остаётся queued с готовым письмом
       } catch { s.errors++; repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
