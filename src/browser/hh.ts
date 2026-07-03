@@ -48,8 +48,11 @@ export class HhBrowser {
     if (await this.isLoggedOut()) throw new LoggedOut();
   }
 
-  async searchVacancies(query: string, area: number): Promise<VacancyInsert[]> {
-    const url = `https://hh.ru/search/vacancy?text=${encodeURIComponent(query)}&area=${area}&order_by=publication_time&items_on_page=50`;
+  async searchVacancies(query: string, area: number, orderBy: "publication_time" | "relevance" | "default" = "publication_time"): Promise<VacancyInsert[]> {
+    // orderBy "default" — без order_by: hh отдаёт свой (релевантный/персональный под резюме)
+    // порядок; с пустым query это = рекомендации hh. Обычный поиск остаётся publication_time.
+    const ord = orderBy === "default" ? "" : `&order_by=${orderBy}`;
+    const url = `https://hh.ru/search/vacancy?text=${encodeURIComponent(query)}&area=${area}${ord}&items_on_page=50`;
     await this.page.goto(url, { waitUntil: "domcontentloaded" });
     await sleep(1500, 4000);
     await this.guard();
@@ -132,11 +135,16 @@ export class HhBrowser {
     if (scenario === "attach") {
       // Отклик уже отправлен самим кликом — прикладываем письмо best-effort (если hh дал кнопку).
       // Отклик засчитан в любом случае → "applied", иначе пайплайн пометит failed и собьёт лимит.
+      // Исключение: если отклик по вакансии УЖЕ был и просмотрен работодателем — письмо приложить
+      // нельзя, и это не свежий отклик от нас → валим вакансию в no_button (по решению пользователя).
+      const alreadySeen = async () =>
+        /уже просмотрен работодателем/i.test(await this.page.locator("body").innerText().catch(() => ""));
       try {
         const attach = this.page.locator(SEL.attachLetter);
         if (await attach.count() > 0) {
           await attach.click();
           await sleep(800, 1500);
+          if (await alreadySeen()) return "no_button";
           const dialog = this.page.getByRole("dialog");        // textarea письма ищем в попапе
           const box = (await dialog.count() > 0 ? dialog : this.page).locator("textarea").first();
           await box.waitFor({ state: "visible", timeout: 8000 });
@@ -144,6 +152,7 @@ export class HhBrowser {
           await sleep(400, 900);
           await this.page.locator(SEL.letterPopupSubmit).click();
           await sleep(1500, 3000);
+          if (await alreadySeen()) return "no_button";         // запрет всплыл при отправке письма
           await this.guard();
         }
       } catch { /* отклик уже ушёл; приложение письма — best-effort, не роняем "applied" */ }

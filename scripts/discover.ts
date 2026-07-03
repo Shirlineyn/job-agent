@@ -28,7 +28,11 @@ async function main() {
       const found = await browser.searchVacancies(q, cfg.area);
       for (const card of found) if (repo.upsertVacancy(db, card)) discovered++;
     }
-    console.log(`discovered новых: ${discovered}`);
+    // hh-рекомендации: пустой запрос + дефолтный (релевантный) порядок hh под резюме.
+    const rec = await browser.searchVacancies("", cfg.area, "default");
+    let recNew = 0;
+    for (const card of rec) if (repo.upsertVacancy(db, card)) { discovered++; recNew++; }
+    console.log(`discovered новых: ${discovered} (из них hh-рекомендаций: ${recNew} из ${rec.length} карточек)`);
     const blacklist = repo.getBlacklist(db);
     for (const v of repo.getByStatus(db, "discovered")) {
       if (scored >= CAP) { console.log(`достигнут потолок скоринга (${CAP}) — остальные оставлены discovered`); break; }
