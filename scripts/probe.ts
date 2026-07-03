@@ -93,6 +93,19 @@ async function main() {
     console.log("[probe] no cards found — skipping fetchVacancyText.");
   }
 
+  if (cards.length > 0) {
+    const first = cards[0];
+    console.log(`[probe] apply() dry-run for: ${first.url}`);
+    try {
+      const result = await browser.apply(first.url, "тестовое письмо от hh-agent (dry run)", true);
+      console.log(`[probe] apply() result: ${result}`);
+    } catch (err) {
+      console.log(`[probe] apply() threw (${(err as Error).name}: ${(err as Error).message}) — expected if not logged in to hh.ru.`);
+    }
+  } else {
+    console.log("[probe] no cards found — skipping apply() dry-run.");
+  }
+
   await browser.close();
 }
 
