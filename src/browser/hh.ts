@@ -1,6 +1,7 @@
 import { chromium, type BrowserContext, type Page } from "playwright";
 import { sleep, jitter } from "./humanize.js";
 import type { VacancyInsert, WorkFormat } from "../state/types.js";
+import type { QuestionnaireItem, QuestionnaireAnswer } from "../llm/questionnaire.js";
 
 const SEL = {
   card: '[data-qa="vacancy-serp__vacancy"]',
@@ -111,6 +112,48 @@ export class HhBrowser {
       if (!(await this.isCaptcha())) return true;
     }
     return false;
+  }
+
+  // Анкета работодателя (опросник) на странице отклика: N вопросов, у каждого radio-варианты
+  // (сгруппированы по input[name], value=id варианта) + textarea для «Свой вариант».
+  async hasQuestionnaire(): Promise<boolean> {
+    return await this.page.locator('[data-qa="employer-asking-for-test"], [data-qa="task-question"]').count() > 0;
+  }
+
+  async extractQuestionnaire(): Promise<QuestionnaireItem[]> {
+    // Порядок в DOM устойчив: i-й task-question ↔ i-я группа radio по name.
+    const texts = await this.page.$$eval('[data-qa="task-question"]',
+      els => els.map(e => (e.textContent || "").replace(/\s+/g, " ").trim()));
+    const radios = await this.page.$$eval('input[type="radio"]', els => els.map(e => ({
+      name: e.getAttribute("name") || "",
+      value: (e as HTMLInputElement).value,
+      text: (e.closest("label")?.textContent || "").replace(/\s+/g, " ").trim(),
+    })));
+    const order: string[] = [];
+    const byName: Record<string, { value: string; text: string }[]> = {};
+    for (const r of radios) {
+      if (!byName[r.name]) { byName[r.name] = []; order.push(r.name); }
+      byName[r.name].push({ value: r.value, text: r.text });
+    }
+    return order.map((name, i) => ({ name, question: texts[i] ?? name, options: byName[name] }));
+  }
+
+  // Заполняет ответы; НЕ отправляет. answers[k].i — индекс вопроса.
+  async fillQuestionnaire(answers: QuestionnaireAnswer[], questions: QuestionnaireItem[]): Promise<void> {
+    const textareas = this.page.locator("textarea");
+    for (const a of answers) {
+      const q = questions[a.i];
+      if (!q) continue;
+      if (a.type === "option" && a.value) {
+        await this.page.locator(`input[name="${q.name}"][value="${a.value}"]`).check({ force: true });
+      } else if (a.type === "custom") {
+        const custom = q.options[q.options.length - 1];             // «Свой вариант» — последний radio
+        if (custom) await this.page.locator(`input[name="${q.name}"][value="${custom.value}"]`).check({ force: true });
+        await sleep(300, 700);
+        if (await textareas.nth(a.i).count() > 0) await textareas.nth(a.i).fill(a.text || "");
+      }
+      await sleep(400, 900);
+    }
   }
 }
 
