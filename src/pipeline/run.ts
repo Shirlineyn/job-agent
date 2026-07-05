@@ -64,18 +64,25 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     if (rec !== "stop" && rec !== "skip") for (const card of rec) if (repo.upsertVacancy(db, card)) s.discovered++;
   }
 
-  // 2) filter + score
+  // 2) filter + score. Потолок скоринга за прогон = 10 × dailyLimit — этого хватает набрать
+  // очередь на дневной лимит, но не сканим весь бэклог разом (капча/бюджет); остаток остаётся
+  // discovered на следующий прогон. Исчерпали бэклог раньше потолка — просто идём в apply
+  // с тем, что набрали (одно-проходно, без до-скана до ровного числа).
   if (s.stopReason === "completed") {
     const blacklist = repo.getBlacklist(db);
+    const scoreCap = 10 * cfg.dailyLimit;
+    let scoredThisRun = 0;
     for (const v of repo.getByStatus(db, "discovered")) {
+      if (scoredThisRun >= scoreCap) break;
       const verdict = applyHardFilters(v, cfg.filters, blacklist);
       if (!verdict.pass) { repo.setStatus(db, v.id, "filtered_out", { filter_reason: verdict.reason }); s.filteredOut++; continue; }
       const text = await guarded(() => deps.browser.fetchVacancyText(v.url));
       if (text === "stop") break;
       if (text === "skip") { repo.setStatus(db, v.id, "failed"); continue; }
+      scoredThisRun++;
       try {
         const score = await scoreVacancy(ctx(v.id), deps.claude, cfg, deps.resume, text);
-        s.scored++;
+        s.scored++; llmErrors = 0;   // успех сбрасывает счётчик ПОДРЯД идущих ошибок
         repo.setStatus(db, v.id, score.score >= cfg.scoreThreshold ? "queued" : "skipped",
           { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify({ text }) });
       } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
@@ -95,6 +102,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
           const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
           letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") });
           repo.setStatus(db, v.id, "queued", { letter });
+          llmErrors = 0;   // успешная генерация письма сбрасывает счётчик подряд-ошибок
         }
         // dry-run: письмо сохранено, браузер не трогаем (повторная навигация по одним
         // и тем же вакансиям каждую сессию — заметный анти-бот паттерн, а проверка не нужна).
@@ -103,7 +111,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
           (qs) => answerQuestionnaire(ctx(v.id), deps.claude, cfg, deps.resume, qs)));
         if (result === "stop") break;
         if (result === "skip" || result === "no_button") { repo.setStatus(db, v.id, "failed"); continue; }
-        if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; await sleep(...cfg.applyPauseMs); }
+        if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; llmErrors = 0; await sleep(...cfg.applyPauseMs); }
       } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
