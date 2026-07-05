@@ -100,9 +100,16 @@ async function main() {
         catch (e) { console.log(`  ✖ письмо не сгенерилось (${String(e).slice(0, 60)}) — пропускаю, отклик НЕ шлю.`); continue; }
       }
       console.log(`\n→ [${v.score}] ${v.employer_name} — ${v.title}`);
-      const result = await browser.apply(v.url, letter, false, (qs) => answerQuestionnaire(ctx, callClaude, cfg, resume, qs));
-      if (result === "applied") { repo.setStatus(db, id, "applied", { applied_at: new Date().toISOString() }); applied++; console.log("  ✔ отправлено."); await pause(cfg); }
-      else { repo.setStatus(db, id, "failed"); console.log("  ✖ не отправлено:", result); }
+      // Транзиентный сбой (403 в answerQuestionnaire, сеть) НЕ должен ронять весь батч —
+      // пропускаем вакансию (остаётся в очереди на ретрай). Капча/разлогин → общий стоп.
+      try {
+        const result = await browser.apply(v.url, letter, false, (qs) => answerQuestionnaire(ctx, callClaude, cfg, resume, qs));
+        if (result === "applied") { repo.setStatus(db, id, "applied", { applied_at: new Date().toISOString() }); applied++; console.log("  ✔ отправлено."); await pause(cfg); }
+        else { repo.setStatus(db, id, "failed"); console.log("  ✖ не отправлено:", result); }
+      } catch (e) {
+        if (e instanceof CaptchaDetected || e instanceof LoggedOut) throw e;
+        console.log(`  ✖ ошибка на отклике (${String(e).slice(0, 60)}) — пропускаю, вакансия остаётся в очереди`);
+      }
     }
   } catch (e) {
     if (e instanceof CaptchaDetected) { stop = "captcha"; console.log("КАПЧА — стоп. Пройди в окне и перезапусти."); }
