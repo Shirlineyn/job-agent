@@ -44,7 +44,11 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
       }
       if (e instanceof LoggedOut) { deps.notify("hh-agent: разлогинило на hh.ru — залогинься в окне браузера"); s.stopReason = "logged_out"; return "stop"; }
       s.errors++;
-      if (++browserErrorStreak >= 3) { s.stopReason = "error_streak"; deps.notify("hh-agent: 3 ошибки подряд, останавливаюсь"); return "stop"; }
+      console.error(`[run ${runId}] browser error #${browserErrorStreak + 1}: ${String(e).replace(/\s+/g, " ").slice(0, 220)}`);
+      await sleep(2000, 5000);   // бэкофф: дать сети/hh восстановиться после краткого блипа
+      // порог 5 (не 3): прогон фетчит десятки страниц, 3 подряд — часто просто моргание сети,
+      // а не поломка; 5 подряд без единого успеха между — уже похоже на реальный сбой.
+      if (++browserErrorStreak >= 5) { s.stopReason = "error_streak"; deps.notify("hh-agent: 5 ошибок подряд, останавливаюсь"); return "stop"; }
       return "skip";
     }
   };
