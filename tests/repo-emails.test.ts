@@ -48,6 +48,6 @@ describe("llm_calls после пересоздания", () => {
   it("принимает purpose=email_search и сохраняет старые записи", () => {
     const db = openDb(":memory:");
     repo.insertLlmCall(db, { vacancy_id: null, run_id: null, provider: "perplexity", purpose: "email_search",
-      model: "sonar", request: "{}", response: null, error: null, input_tokens: 1, output_tokens: 1, cost_usd: 0, latency_ms: 1 });
+      model: "sonar", request: "{}", response: null, error: null, input_tokens: 1, output_tokens: 1, cache_creation_tokens: null, cache_read_tokens: null, cost_usd: 0, latency_ms: 1 });
   });
 });
