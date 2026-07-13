@@ -25,9 +25,13 @@ export function parseScore(raw: string): ScoreResult {
 export async function scoreVacancy(
   ctx: LlmLogCtx, claude: typeof callClaude, cfg: Config, resume: string, vacancyText: string,
 ): Promise<ScoreResult> {
-  const user = `<резюме>\n${resume}\n</резюме>\n<вакансия>\n${vacancyText}\n</вакансия>\nЗарплатные ожидания: ${cfg.filters.salaryMin}+ руб на руки.`;
+  // Резюме и зарплатные ожидания стабильны в рамках запуска — уходят в system вторым
+  // блоком, чтобы кэшируемый префикс превысил минимум 2048 токенов (см. anthropic.ts).
+  // В user остаётся только меняющаяся вакансия.
+  const stable = `<резюме>\n${resume}\n</резюме>\nЗарплатные ожидания: ${cfg.filters.salaryMin}+ руб на руки.`;
+  const user = `<вакансия>\n${vacancyText}\n</вакансия>`;
   const ask = (extra: string) => claude(ctx, {
-    model: cfg.anthropicModel, system: SCORING_SYSTEM_V3, user: user + extra, maxTokens: 1024, purpose: "scoring",
+    model: cfg.anthropicModel, system: [SCORING_SYSTEM_V3, stable], user: user + extra, maxTokens: 1024, purpose: "scoring",
   });
   try { return parseScore(await ask("")); }
   catch (e) {

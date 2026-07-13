@@ -60,6 +60,8 @@ export interface LlmCallInsert {
   error: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  cache_creation_tokens: number | null;
+  cache_read_tokens: number | null;
   cost_usd: number | null;
   latency_ms: number | null;
 }

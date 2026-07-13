@@ -20,11 +20,14 @@ export async function writeLetter(
   ctx: LlmLogCtx, claude: typeof callClaude, cfg: Config,
   args: { resume: string; vacancyText: string; research: string; score: ScoreResult },
 ): Promise<string> {
-  const user = `<резюме>\n${args.resume}\n</резюме>\n<вакансия>\n${args.vacancyText}\n</вакансия>\n<справка_о_компании>\n${args.research}\n</справка_о_компании>\n<сильные_пересечения>\n${args.score.reasons.join("\n")}\n</сильные_пересечения>`;
-  const letter = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V2, user, maxTokens: 1024, purpose: "letter" })).trim();
+  // Резюме — в system вторым блоком: кэшируемый префикс должен превысить 2048 токенов
+  // (LETTER_SYSTEM_V2 сам по себе ≈ 0.6k — ниже минимума, кэш молча не пишется).
+  const system = [LETTER_SYSTEM_V2, `<резюме>\n${args.resume}\n</резюме>`];
+  const user = `<вакансия>\n${args.vacancyText}\n</вакансия>\n<справка_о_компании>\n${args.research}\n</справка_о_компании>\n<сильные_пересечения>\n${args.score.reasons.join("\n")}\n</сильные_пересечения>`;
+  const letter = (await claude(ctx, { model: cfg.anthropicModel, system, user, maxTokens: 1024, purpose: "letter" })).trim();
   const check = validateLetter(letter);
   if (!check.ok) {
-    const retry = (await claude(ctx, { model: cfg.anthropicModel, system: LETTER_SYSTEM_V2,
+    const retry = (await claude(ctx, { model: cfg.anthropicModel, system,
       user: user + `\nПредыдущее письмо отклонено проверкой: ${check.problems.join("; ")}. Исправь и верни только текст письма.`,
       maxTokens: 1024, purpose: "letter" })).trim();
     const check2 = validateLetter(retry);

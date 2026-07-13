@@ -56,8 +56,8 @@ export function appliedToday(db: Database): number {
 }
 
 export function insertLlmCall(db: Database, c: LlmCallInsert): void {
-  db.prepare(`INSERT INTO llm_calls (vacancy_id,run_id,provider,purpose,model,request,response,error,input_tokens,output_tokens,cost_usd,latency_ms)
-    VALUES (@vacancy_id,@run_id,@provider,@purpose,@model,@request,@response,@error,@input_tokens,@output_tokens,@cost_usd,@latency_ms)`).run(c);
+  db.prepare(`INSERT INTO llm_calls (vacancy_id,run_id,provider,purpose,model,request,response,error,input_tokens,output_tokens,cache_creation_tokens,cache_read_tokens,cost_usd,latency_ms)
+    VALUES (@vacancy_id,@run_id,@provider,@purpose,@model,@request,@response,@error,@input_tokens,@output_tokens,@cache_creation_tokens,@cache_read_tokens,@cost_usd,@latency_ms)`).run(c);
 }
 
 export function startRun(db: Database, trigger: "schedule" | "manual", mode: "live" | "dry_run"): number {

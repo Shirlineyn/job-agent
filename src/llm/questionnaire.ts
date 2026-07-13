@@ -34,8 +34,10 @@ export async function answerQuestionnaire(
     q.options.length > 0
       ? `Вопрос ${i}${q.multi ? " (МОЖНО НЕСКОЛЬКО — чекбоксы, верни массив values)" : ""}: ${q.question}\nВарианты: ${q.options.map(o => `[value=${o.value}] ${o.text}`).join(" | ")}`
       : `Вопрос ${i} (ОТКРЫТЫЙ, свободный текст): ${q.question}`).join("\n\n");
-  const user = `<резюме>\n${resume}\n</резюме>\n<анкета>\n${body}\n</анкета>\nОтветь JSON-массивом строго по инструкции (по одному объекту на вопрос, с полем i).`;
-  const raw = await claude(ctx, { model: cfg.anthropicModel, system: QUESTIONNAIRE_SYSTEM, user, maxTokens: 1024, purpose: "letter" });
+  // Резюме — в system вторым блоком: так кэшируемый префикс превышает минимум
+  // 2048 токенов и делит кэш между вызовами в рамках запуска (см. anthropic.ts).
+  const user = `<анкета>\n${body}\n</анкета>\nОтветь JSON-массивом строго по инструкции (по одному объекту на вопрос, с полем i).`;
+  const raw = await claude(ctx, { model: cfg.anthropicModel, system: [QUESTIONNAIRE_SYSTEM, `<резюме>\n${resume}\n</резюме>`], user, maxTokens: 1024, purpose: "letter" });
   const m = raw.match(/\[[\s\S]*\]/);
   if (!m) throw new Error("questionnaire: no json array in response");
   return schema.parse(JSON.parse(m[0]));

@@ -1,5 +1,21 @@
 import { describe, it, expect, vi } from "vitest";
-import { withRetry } from "../src/llm/log.js";
+import { withRetry, cost } from "../src/llm/log.js";
+
+describe("cost", () => {
+  it("prices plain input/output for claude-sonnet-5 ($3/$15 per 1M)", () => {
+    expect(cost("claude-sonnet-5", 1_000_000, 1_000_000)).toBeCloseTo(3 + 15, 10);
+  });
+  it("prices cache write at 1.25x and cache read at 0.1x input price", () => {
+    // input_tokens = некэшированный остаток; кэш-токены идут отдельными слагаемыми
+    const usd = cost("claude-sonnet-5", 100, 200, 8000, 0);
+    expect(usd).toBeCloseTo((100 * 3 + 8000 * 1.25 * 3 + 200 * 15) / 1_000_000, 12);
+    const usdRead = cost("claude-sonnet-5", 100, 200, 0, 8000);
+    expect(usdRead).toBeCloseTo((100 * 3 + 8000 * 0.1 * 3 + 200 * 15) / 1_000_000, 12);
+  });
+  it("defaults cache tokens to 0 (backwards compatible)", () => {
+    expect(cost("claude-sonnet-5", 100, 200)).toBeCloseTo(cost("claude-sonnet-5", 100, 200, 0, 0), 12);
+  });
+});
 
 describe("withRetry", () => {
   it("retries retryable errors up to 3 attempts then succeeds", async () => {
