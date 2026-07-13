@@ -10,6 +10,13 @@ export const ConfigSchema = z.object({
   searchQueries: z
     .array(z.string())
     .default(['"AI-инженер" OR "LLM" OR "ML-инженер"']),
+  // Новые источники ищут по простым ключевым словам (их поиск не понимает hh-синтаксис "A OR B").
+  enabledSources: z
+    .array(z.enum(["hirehi", "habr", "getmatch", "trudvsem"]))
+    .default(["hirehi", "habr", "getmatch", "trudvsem"]),
+  sourceKeywords: z
+    .array(z.string())
+    .default(["LLM", "ML инженер", "AI инженер", "аналитик данных", "python"]),
   area: z.number().default(1),
   filters: z
     .object({
