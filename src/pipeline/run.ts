@@ -6,6 +6,7 @@ import { scoreVacancy } from "../llm/scoring.js";
 import { researchCompany } from "../llm/research.js";
 import { writeLetter } from "../llm/letter.js";
 import { answerQuestionnaire } from "../llm/questionnaire.js";
+import { findCompanyEmail } from "../llm/emailSearch.js";
 import { CaptchaDetected, LoggedOut, type HhBrowser } from "../browser/hh.js";
 import { sleep } from "../browser/humanize.js";
 import type { Config } from "../config.js";
@@ -104,6 +105,22 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
       if (scoredThisRun >= scoreCap) break;
       const verdict = applyHardFilters(v, cfg.filters, blacklist);
       if (!verdict.pass) { repo.setStatus(db, v.id, "filtered_out", { filter_reason: verdict.reason }); s.filteredOut++; continue; }
+      // email-гейт (только не-hh): письмо слать некуда — скорить незачем (скоринг в ~5 раз
+      // дороже поиска почты, а почта кэшируется на компанию). hh-вакансии откликаются
+      // через браузер, им почта не нужна.
+      if (v.source !== "hh") {
+        try {
+          const payloadEmail = (JSON.parse(v.raw_json ?? "{}") as { email?: string | null }).email ?? null;
+          const email = await findCompanyEmail(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name, payloadEmail);
+          if (!email) { repo.setStatus(db, v.id, "skipped", { filter_reason: "no_email" }); continue; }
+          llmErrors = 0;
+        } catch (e) {
+          s.errors++;
+          if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
+          if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; }
+          continue;
+        }
+      }
       let text: string;
       if (v.source === "hh") {
         const t = await guarded(() => deps.browser.fetchVacancyText(v.url));
