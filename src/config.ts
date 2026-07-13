@@ -40,6 +40,17 @@ export const ConfigSchema = z.object({
   scoreThreshold: z.number().default(65),
   // dailyLimit — главный предохранитель: целое 1..50, чтобы битый конфиг не открыл шлюз.
   dailyLimit: z.number().int().min(1).max(50).default(10),
+  // Прямые письма HR: отправка только вручную через approve_email, лимит — второй предохранитель.
+  emailDailyLimit: z.number().int().min(1).max(30).default(10),
+  smtp: z
+    .object({
+      host: z.string().default("smtp.gmail.com"),
+      port: z.number().default(465),
+      user: z.string().default("doronin.alex001@gmail.com"),
+      fromName: z.string().default("Александр Доронин"),
+    })
+    .default({ host: "smtp.gmail.com", port: 465, user: "doronin.alex001@gmail.com", fromName: "Александр Доронин" }),
+  resumePdfPath: z.string().nullable().default(null),
   schedule: z.array(z.string()).default(["0 10 * * *", "30 15 * * *"]),
   applyPauseMs: z.tuple([z.number(), z.number()]).default([180000, 420000]),
   anthropicModel: z.string().default("claude-sonnet-5"),
