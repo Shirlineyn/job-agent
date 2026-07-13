@@ -37,6 +37,11 @@
 - Карточка: `GET https://career.habr.com/vacancies/{id}` — статический HTML, описание в `div.vacancy-description__text` + JSON-LD JobPosting.
 - RSS: `/vacancies/rss?q=...`. Антибота нет, UA не проверяется, 10 подряд запросов — ок.
 - Поля списка: salary{from,to}, qualification, skills, remoteWork, company{rating, accredited}, locations.
+- **Уточнения схемы (реализация задачи 5, curl-сверка 2026-07-13):**
+  - `q=` реально фильтрует (totalResults: python 509, golang 48, мусорное слово 0) — в отличие от hirehi, где `query=` молча игнорировался.
+  - Alias компании — `company.alias_name`, не `alias`. `publishedDate` — объект `{date, title}`, `date` — ISO с таймзоной (`2026-07-07T17:36:58+03:00`).
+  - `salary` содержит лишнее поле `formatted`; у большинства вакансий from/to/currency = null (в живой выборке по «llm» вилка только у 7 из 62). Вместо неё Хабр отдаёт `predictedSalary` (свою оценку) — это НЕ вилка работодателя, адаптер её не берёт.
+  - Карточка `/vacancies/{id}` — статический HTML c одним `<script type="application/ld+json">` (JobPosting); `description` — HTML полного описания (~2-5 КБ текста после stripHtml). JSON-LD также содержит `datePosted`, но только дату без времени — берём `publishedDate.date` из списка.
 
 ### getmatch.ru — приоритет 3
 - `GET https://getmatch.ru/api/offers?limit=100&offset=0` → `{meta:{total:720}, offers:[...]}`, `description_html` прямо в списке, вилки net/gross, `english_level`, `location_items` (remote).
