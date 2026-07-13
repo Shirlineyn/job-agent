@@ -28,7 +28,7 @@ export async function withRetry<T>(fn: () => Promise<T>, onRetry: (attempt: numb
 }
 
 export function logCall(ctx: LlmLogCtx, row: {
-  provider: "anthropic" | "perplexity"; purpose: "scoring" | "research" | "letter"; model: string;
+  provider: "anthropic" | "perplexity"; purpose: "scoring" | "research" | "letter" | "email_search"; model: string;
   request: unknown; response: unknown; error: string | null;
   inputTokens: number | null; outputTokens: number | null; latencyMs: number;
 }): void {

@@ -56,7 +56,7 @@ export interface LlmCallInsert {
   vacancy_id: string | null;
   run_id: number | null;
   provider: "anthropic" | "perplexity";
-  purpose: "scoring" | "research" | "letter";
+  purpose: "scoring" | "research" | "letter" | "email_search";
   model: string;
   request: string;
   response: string | null;
@@ -65,6 +65,26 @@ export interface LlmCallInsert {
   output_tokens: number | null;
   cost_usd: number | null;
   latency_ms: number | null;
+}
+
+export type EmailStatus = "draft" | "sent" | "rejected";
+
+export interface EmailRow {
+  id: number;
+  vacancy_id: string;
+  to_email: string;
+  subject: string;
+  body: string;
+  status: EmailStatus;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface EmailInsert {
+  vacancy_id: string;
+  to_email: string;
+  subject: string;
+  body: string;
 }
 
 export interface RunPatch {
