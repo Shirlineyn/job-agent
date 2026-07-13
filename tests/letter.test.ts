@@ -35,7 +35,12 @@ describe("EMAIL_LETTER_SYSTEM_V1", () => {
     expect(p).not.toContain("http");
     expect(p).toContain("Не добавляй в письмо никаких URL");
   });
-  it("запрещает открывать письмо мета-рамкой (не спам-зачин)", () => {
-    expect(EMAIL_LETTER_SYSTEM_V1(null)).toMatch(/ПЕРВАЯ фраза/);
+  it("требует приветствие и запрещает мета-рамку в зачине", () => {
+    const p = EMAIL_LETTER_SYSTEM_V1(null);
+    expect(p).toContain("Здравствуйте");
+    expect(p).toContain("мета-рамки");
+  });
+  it("просит маркированный список пересечений", () => {
+    expect(EMAIL_LETTER_SYSTEM_V1(null)).toMatch(/маркированным списком/);
   });
 });
