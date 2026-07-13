@@ -51,7 +51,7 @@ export function trudvsemSource(f: Fetch = fetch): JobSource {
             out.push({
               id, url: v.vac_url ?? `https://trudvsem.ru/vacancy/card/${v.company.companycode}/${v.id}`,
               title: v["job-name"],
-              employer_id: `trudvsem:${v.company.companycode ?? v.company.inn ?? v.company.name.toLowerCase()}`,
+              employer_id: `trudvsem:${v.company.companycode ?? v.company.inn ?? v.company.name.toLowerCase().trim()}`,
               employer_name: v.company.name,
               salary_from: v.salary_min || null, salary_to: v.salary_max || null,
               currency: v.salary_min || v.salary_max ? "RUR" : null,

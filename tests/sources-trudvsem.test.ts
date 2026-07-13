@@ -57,4 +57,28 @@ describe("trudvsemSource", () => {
     const cards = await trudvsemSource(f as never).search(["zzzznonexistent"], {} as Config);
     expect(cards).toEqual([]);
   });
+
+  it("регрессия: salary_min=0 и salary_max=0 → null (не вилка до 0₽)", async () => {
+    const fixtureZeroSalary = {
+      status: "200",
+      results: { vacancies: [{ vacancy: {
+        id: "c11111111-bbbb", "job-name": "Разработчик C++",
+        salary_min: 0, salary_max: 0,
+        duty: "<p>Разработка приложений</p>",
+        requirements: "C++, опыт от 2 лет",
+        company: { name: "Tech Startup", companycode: "1234567890123" },
+        vac_url: "https://trudvsem.ru/vacancy/card/1234567890123/c11111111-bbbb",
+        "creation-date": "2026-07-12",
+      }}]},
+    };
+    const f = vi.fn()
+      .mockResolvedValueOnce(jsonRes(fixtureZeroSalary))
+      .mockResolvedValue(jsonRes({ status: "200", results: {} }));
+    const cards = await trudvsemSource(f as never).search(["c++"], {} as Config);
+    expect(cards).toHaveLength(1);
+    const c = cards[0];
+    expect(c.salary_from).toBeNull();
+    expect(c.salary_to).toBeNull();
+    expect(c.currency).toBeNull();
+  });
 });
