@@ -1,6 +1,7 @@
 // src/state/repo.ts
 import type { Database } from "better-sqlite3";
-import type { VacancyInsert, VacancyRow, VacancyStatus, LlmCallInsert, RunPatch } from "./types.js";
+import type { VacancyInsert, VacancyRow, VacancyStatus, LlmCallInsert, RunPatch, EmailInsert, EmailRow, EmailStatus } from "./types.js";
+import { dedupKey } from "./dedup.js";
 
 // Whitelist of columns that can be updated via setStatus
 const UPDATABLE_COLS = new Set<keyof VacancyRow>([
@@ -10,24 +11,30 @@ const UPDATABLE_COLS = new Set<keyof VacancyRow>([
 ]);
 
 export function upsertVacancy(db: Database, v: VacancyInsert): boolean {
+  const key = dedupKey(v.employer_name, v.title);
+  // hh — первичный источник: его вставляем всегда. Дубликат из нового источника
+  // (та же вакансия у того же работодателя, найденная где-то ещё) не вставляем —
+  // отклик по ней уже возможен через hh, а двойной скоринг жжёт бюджет.
+  if (v.source !== "hh") {
+    const dup = db.prepare(`SELECT 1 FROM vacancies WHERE dedup_key=? LIMIT 1`).get(key);
+    if (dup) return false;
+  }
   const insertVacancy = db.prepare(`INSERT OR IGNORE INTO vacancies
-    (id,url,title,employer_id,employer_name,salary_from,salary_to,currency,work_format,experience,published_at,raw_json)
-    VALUES (@id,@url,@title,@employer_id,@employer_name,@salary_from,@salary_to,@currency,@work_format,@experience,@published_at,@raw_json)`);
+    (id,url,title,employer_id,employer_name,salary_from,salary_to,currency,work_format,experience,published_at,raw_json,source,dedup_key)
+    VALUES (@id,@url,@title,@employer_id,@employer_name,@salary_from,@salary_to,@currency,@work_format,@experience,@published_at,@raw_json,@source,@key)`);
 
   // vacancies.employer_id has a FK to companies(employer_id) (see docs/db-schema.md),
   // but vacancies are discovered (and must be inserted) before any company research
   // happens — the companies row is normally created later, during the research step.
   // To satisfy the FK at discovery time we ensure a stub companies row exists first;
   // saveCompanyResearch() later fills in `research`/`researched_at` for the same row.
-  const run = db.transaction((row: VacancyInsert) => {
+  const run = db.transaction((row: VacancyInsert & { key: string }) => {
     if (row.employer_id != null) {
       db.prepare(`INSERT OR IGNORE INTO companies (employer_id, name) VALUES (@employer_id, @employer_name)`).run(row);
     }
     return insertVacancy.run(row);
   });
-
-  const r = run(v);
-  return r.changes > 0;
+  return run({ ...v, key }).changes > 0;
 }
 
 export function setStatus(db: Database, id: string, status: VacancyStatus, extra: Partial<VacancyRow> = {}): void {
@@ -90,6 +97,50 @@ export function getCompanyResearch(db: Database, employerId: string): { research
 export function saveCompanyResearch(db: Database, employerId: string, name: string, research: string): void {
   db.prepare(`INSERT INTO companies (employer_id,name,research,researched_at) VALUES (?,?,?,datetime('now'))
     ON CONFLICT(employer_id) DO UPDATE SET research=excluded.research, researched_at=excluded.researched_at`).run(employerId, name, research);
+}
+
+export function getCompanyEmail(db: Database, employerId: string):
+  { email: string | null; status: "found" | "not_found"; checkedAt: string } | null {
+  const r = db.prepare(`SELECT contact_email, email_status, email_checked_at FROM companies
+    WHERE employer_id=? AND email_status IS NOT NULL`).get(employerId) as
+    { contact_email: string | null; email_status: "found" | "not_found"; email_checked_at: string } | undefined;
+  return r ? { email: r.contact_email, status: r.email_status, checkedAt: r.email_checked_at } : null;
+}
+
+export function saveCompanyEmail(db: Database, employerId: string, name: string,
+  email: string | null, source: "source_payload" | "perplexity" | null): void {
+  db.prepare(`INSERT INTO companies (employer_id, name, contact_email, email_status, email_checked_at, email_source)
+    VALUES (?,?,?,?,datetime('now'),?)
+    ON CONFLICT(employer_id) DO UPDATE SET contact_email=excluded.contact_email,
+      email_status=excluded.email_status, email_checked_at=excluded.email_checked_at, email_source=excluded.email_source`)
+    .run(employerId, name, email, email ? "found" : "not_found", source);
+}
+
+export function insertEmailDraft(db: Database, e: EmailInsert): boolean {
+  const r = db.prepare(`INSERT OR IGNORE INTO emails (vacancy_id,to_email,subject,body)
+    VALUES (@vacancy_id,@to_email,@subject,@body)`).run(e);
+  return r.changes > 0;
+}
+export function getEmailByVacancy(db: Database, vacancyId: string): EmailRow | undefined {
+  return db.prepare(`SELECT * FROM emails WHERE vacancy_id=?`).get(vacancyId) as EmailRow | undefined;
+}
+export function getEmailsByStatus(db: Database, status: EmailStatus): EmailRow[] {
+  return db.prepare(`SELECT * FROM emails WHERE status=? ORDER BY created_at`).all(status) as EmailRow[];
+}
+export function updateEmailDraft(db: Database, id: number, patch: { subject?: string; body?: string }): void {
+  db.prepare(`UPDATE emails SET subject=COALESCE(@subject,subject), body=COALESCE(@body,body)
+    WHERE id=@id AND status='draft'`).run({ subject: null, body: null, ...patch, id });
+}
+export function markEmailSent(db: Database, id: number): void {
+  db.prepare(`UPDATE emails SET status='sent', sent_at=datetime('now') WHERE id=?`).run(id);
+}
+export function markEmailRejected(db: Database, id: number): void {
+  db.prepare(`UPDATE emails SET status='rejected' WHERE id=?`).run(id);
+}
+export function emailsSentToday(db: Database): number {
+  const r = db.prepare(`SELECT COUNT(*) n FROM emails WHERE status='sent'
+    AND date(sent_at,'localtime')=date('now','localtime')`).get() as { n: number };
+  return r.n;
 }
 
 export function report(db: Database, date: string): unknown {

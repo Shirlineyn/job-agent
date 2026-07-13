@@ -6,11 +6,13 @@ import { scoreVacancy } from "../llm/scoring.js";
 import { researchCompany } from "../llm/research.js";
 import { writeLetter } from "../llm/letter.js";
 import { answerQuestionnaire } from "../llm/questionnaire.js";
+import { findCompanyEmail } from "../llm/emailSearch.js";
 import { CaptchaDetected, LoggedOut, type HhBrowser } from "../browser/hh.js";
 import { sleep } from "../browser/humanize.js";
 import type { Config } from "../config.js";
 import type { callClaude } from "../llm/anthropic.js";
 import type { callPerplexity } from "../llm/perplexity.js";
+import type { JobSource } from "../sources/types.js";
 
 // Транзиентный сбой (API-хиккап: Perplexity/Anthropic 403/408/429/5xx, timeout, сеть)
 // стоит повторить в СЛЕДУЮЩЕЙ сессии, а не помечать вакансию failed навсегда. Контентные
@@ -23,7 +25,7 @@ function isTransient(e: unknown): boolean {
 }
 
 export type BrowserPort = Pick<HhBrowser, "searchVacancies" | "fetchVacancyText" | "apply" | "waitCaptchaCleared">;
-export type Deps = { db: Database; cfg: Config; browser: BrowserPort; claude: typeof callClaude; pplx: typeof callPerplexity; notify: (msg: string) => void; resume: string };
+export type Deps = { db: Database; cfg: Config; browser: BrowserPort; claude: typeof callClaude; pplx: typeof callPerplexity; notify: (msg: string) => void; resume: string; sources: JobSource[] };
 export type RunSummary = { runId: number; discovered: number; filteredOut: number; scored: number; applied: number; errors: number; stopReason: string };
 
 export async function runSession(deps: Deps, trigger: "schedule" | "manual", modeOverride?: "live" | "dry_run"): Promise<RunSummary> {
@@ -68,6 +70,20 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     if (rec !== "stop" && rec !== "skip") for (const card of rec) if (repo.upsertVacancy(db, card)) s.discovered++;
   }
 
+  // 1b) ingest из HTTP-источников: браузер не нужен, ошибка одного источника — не повод
+  // останавливать прогон (hh-часть уже отработала, остальные источники независимы). Стадия
+  // выполняется вне зависимости от stopReason стадии 1 (даже после captcha/logged_out) —
+  // именно поэтому она вставлена между стадиями 1 и 2 без обёртки в if (stopReason === "completed").
+  for (const src of deps.sources) {
+    try {
+      const cards = await src.search(cfg.sourceKeywords, cfg);
+      for (const c of cards) if (repo.upsertVacancy(db, c)) s.discovered++;
+    } catch (e) {
+      s.errors++;
+      console.error(`[run ${runId}] source ${src.name} failed: ${String(e).slice(0, 200)}`);
+    }
+  }
+
   // 2) filter + score. Потолок скоринга за прогон = 10 × dailyLimit — этого хватает набрать
   // очередь на дневной лимит, но не сканим весь бэклог разом (капча/бюджет); остаток остаётся
   // discovered на следующий прогон. Исчерпали бэклог раньше потолка — просто идём в apply
@@ -76,19 +92,66 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     const blacklist = repo.getBlacklist(db);
     const scoreCap = 10 * cfg.dailyLimit;
     let scoredThisRun = 0;
+    // Предохранитель для не-hh fetchText, отдельно по каждому источнику: если источник лёг,
+    // каждая его discovered-строка иначе висит по 30-60с таймаута ПОСЛЕДОВАТЕЛЬНО без
+    // ограничителя (в отличие от hh-ветки, где guarded уже останавливает прогон после 5 подряд
+    // ошибок браузера). Здесь источники независимы — стопать весь прогон из-за одного лежащего
+    // источника не нужно, но и жечь минуты на заведомо мёртвый источник тоже нельзя: после 3
+    // подряд ошибок конкретного источника пропускаем остальные его строки без сетевого вызова
+    // (вакансии остаются discovered и попробуются в следующем прогоне). Успешный fetchText
+    // сбрасывает счётчик именно своего источника.
+    const sourceErrorStreak = new Map<string, number>();
     for (const v of repo.getByStatus(db, "discovered")) {
       if (scoredThisRun >= scoreCap) break;
       const verdict = applyHardFilters(v, cfg.filters, blacklist);
       if (!verdict.pass) { repo.setStatus(db, v.id, "filtered_out", { filter_reason: verdict.reason }); s.filteredOut++; continue; }
-      const text = await guarded(() => deps.browser.fetchVacancyText(v.url));
-      if (text === "stop") break;
-      if (text === "skip") { repo.setStatus(db, v.id, "failed"); continue; }
+      // email-гейт (только не-hh): письмо слать некуда — скорить незачем (скоринг в ~5 раз
+      // дороже поиска почты, а почта кэшируется на компанию). hh-вакансии откликаются
+      // через браузер, им почта не нужна.
+      if (v.source !== "hh") {
+        try {
+          const payloadEmail = (JSON.parse(v.raw_json ?? "{}") as { email?: string | null }).email ?? null;
+          const email = await findCompanyEmail(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name, payloadEmail);
+          if (!email) { repo.setStatus(db, v.id, "skipped", { filter_reason: "no_email" }); continue; }
+          llmErrors = 0;
+        } catch (e) {
+          s.errors++;
+          if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
+          if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; }
+          continue;
+        }
+      }
+      let text: string;
+      if (v.source === "hh") {
+        const t = await guarded(() => deps.browser.fetchVacancyText(v.url));
+        if (t === "stop") break;
+        if (t === "skip") { repo.setStatus(db, v.id, "failed"); continue; }
+        text = t;
+      } else {
+        if ((sourceErrorStreak.get(v.source) ?? 0) >= 3) continue;   // источник лежит — не долбим таймаутами дальше
+        const src = deps.sources.find(x => x.name === v.source);
+        if (!src) { repo.setStatus(db, v.id, "failed", { filter_reason: "source_disabled" }); continue; }
+        try {
+          text = await src.fetchText(v);
+          sourceErrorStreak.set(v.source, 0);
+        } catch (e) {
+          s.errors++;
+          sourceErrorStreak.set(v.source, (sourceErrorStreak.get(v.source) ?? 0) + 1);
+          // транзиентная ошибка — оставляем discovered на следующий прогон
+          if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
+          continue;
+        }
+      }
       scoredThisRun++;
       try {
         const score = await scoreVacancy(ctx(v.id), deps.claude, cfg, deps.resume, text);
         s.scored++; llmErrors = 0;   // успех сбрасывает счётчик ПОДРЯД идущих ошибок
+        // Мержим, а не заменяем: raw_json может нести полезную нагрузку из источника
+        // (например, trudvsem кладёт туда email работодателя для будущего email-flow) —
+        // затирание raw_json целиком уничтожало бы её безвозвратно.
+        const mergedRaw = { ...(JSON.parse(v.raw_json ?? "{}") as object), text };
         repo.setStatus(db, v.id, score.score >= cfg.scoreThreshold ? "queued" : "skipped",
-          { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify({ text }) });
+          { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify(mergedRaw) });
       } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }
@@ -96,6 +159,8 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
   // 3) apply (перемешанная очередь, лимит из БД)
   if (s.stopReason === "completed") {
     for (const v of repo.getByStatus(db, "queued").sort(() => Math.random() - 0.5)) {
+      // Отклик умеем делать только на hh (браузер). Не-hh queued ждут email-flow (отдельный план).
+      if (v.source !== "hh") continue;
       if (repo.appliedToday(db) >= cfg.dailyLimit) { s.stopReason = "daily_limit"; break; }
       try {
         // Письмо генерируем только один раз: если оно уже есть (прошлая dry-run сессия),
@@ -118,6 +183,40 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         if (result === "applied") { repo.setStatus(db, v.id, "applied", { applied_at: new Date().toISOString() }); s.applied++; llmErrors = 0; await sleep(...cfg.applyPauseMs); }
       } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
+  }
+
+  // 3b) черновики писем для не-hh queued: research → письмо → emails(draft).
+  // Отправки здесь НЕТ — только очередь на ручное подтверждение (approve_email в MCP).
+  if (s.stopReason === "completed" || s.stopReason === "daily_limit") {
+    let drafts = 0;
+    for (const v of repo.getByStatus(db, "queued")) {
+      if (v.source === "hh") continue;
+      if (repo.getEmailByVacancy(db, v.id)) continue;
+      // Ключ кэша должен совпадать с гейтом (stage 2): employer_id ?? employer_name.
+      // Иначе вакансия без employer_id проходит гейт (кэшируется по имени),
+      // но 3b молча бросает её в skipped/no_email (ищет только по id).
+      const contact = repo.getCompanyEmail(db, v.employer_id ?? v.employer_name);
+      if (!contact?.email) { repo.setStatus(db, v.id, "skipped", { filter_reason: "no_email" }); continue; }
+      try {
+        let letter = v.letter;
+        if (!letter) {
+          const research = await researchCompany(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name);
+          const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
+          letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") });
+          repo.setStatus(db, v.id, "queued", { letter });
+        }
+        repo.insertEmailDraft(db, {
+          vacancy_id: v.id, to_email: contact.email,
+          subject: `Отклик на вакансию «${v.title}» — Александр Доронин`, body: letter,
+        });
+        drafts++; llmErrors = 0;
+      } catch (e) {
+        s.errors++;
+        if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
+        if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; }
+      }
+    }
+    if (drafts > 0) deps.notify(`hh-agent: ${drafts} новых писем ждут подтверждения (get_email_queue)`);
   }
 
   repo.finishRun(db, runId, { discovered: s.discovered, filtered_out: s.filteredOut, scored: s.scored, applied: s.applied, errors: s.errors, stop_reason: s.stopReason });
