@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | **hirehi.ru** | легко | открытый JSON API (поиск + карточка) | ~16 000 (сам агрегатор) | нет |
 | **Habr Career** | легко | JSON `/api/frontend/vacancies` + HTML/JSON-LD карточки | ~1 400 (IT-only) | нет |
-| **getmatch.ru** | легко | JSON `/api/offers` (описание прямо в API) | ~720 | нет |
+| **getmatch.ru** | легко | JSON `/api/offers` (описание — `offer_description`, прямо в списке) | ~720 | нет |
 | **SuperJob** | легко | официальный API (бесплатный app key, без OAuth) или HTML+`APP_STATE` | ~121k всего, IT мало (python Мск ~51) | нет |
 | **trudvsem.ru** | легко | официальное открытое API, без ключа | python Мск ~125 | нет |
 | **Rabota.ru** | средне | Playwright (SSR только 1-я страница, пагинация JS-only) | python Мск ~2 311 | да |
@@ -44,8 +44,11 @@
   - Карточка `/vacancies/{id}` — статический HTML c одним `<script type="application/ld+json">` (JobPosting); `description` — HTML полного описания (~2-5 КБ текста после stripHtml). JSON-LD также содержит `datePosted`, но только дату без времени — берём `publishedDate.date` из списка.
 
 ### getmatch.ru — приоритет 3
-- `GET https://getmatch.ru/api/offers?limit=100&offset=0` → `{meta:{total:720}, offers:[...]}`, `description_html` прямо в списке, вилки net/gross, `english_level`, `location_items` (remote).
-- Текстового поиска в API нет — выкачивать всё (8 запросов) и фильтровать локально.
+- `GET https://getmatch.ru/api/offers?limit=100&offset=0` → `{meta:{total:721}, offers:[...]}`, вилки `salary_display_from/to` + `salary_currency` (RUB/USD/EUR), `english_level`, `location_items:[{label, format, exclude}]` (`format` ∈ remote/hybrid/office/relocation_company).
+- Текстового поиска в API нет — выкачивать всё (8 запросов по 100) и фильтровать локально по `position` + тексту описания.
+- **Уточнение (реализация задачи 6, curl-сверка 2026-07-13): поле `description_html` в ответе есть, но оно ВСЕГДА `null`** — и в списке `/api/offers`, и в детальном `/api/offers/<id>` (проверено на ~60 офферах, включая "one_day_offer" и обычные "vacancy"). Реальный текст описания (HTML) приходит **прямо в списке** под именем **`offer_description`** — сама идея брифа "текст доступен без похода на карточку" верна, просто под другим именем поля. Адаптер кладёт `stripHtml(offer_description)` в `raw_json` при ingest — `fetchText` не ходит в сеть.
+- **Уточнение: `url` в ответе — относительный путь** (`/vacancies/<id>-<slug>`), не абсолютный. Адаптер сам достраивает `https://getmatch.ru` + `url`, с фолбэком на `/vacancies/<id>`, если поле пустое.
+- Остальные поля (`salary_display_from/to`, `salary_currency`, структура `location_items`) совпали с ожиданиями брифа без изменений.
 - На веб-страницах есть Яндекс SmartCaptcha, но API отвечает голому curl.
 
 ### SuperJob
