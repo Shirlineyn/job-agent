@@ -84,11 +84,15 @@ function buildServer(db: Database, mkDeps: () => Promise<Deps>): McpServer {
       const cfg = loadConfig();
       const pending = repo.getUndraftedEmails(db);
       if (pending.length === 0) return j({ drafted: 0, note: "нет новых черновиков" });
+      const done: string[] = [];
       try {
-        const n = await appendToGmailDrafts(cfg, pending.map(e => ({ to: e.to_email, subject: e.subject, body: e.body })));
-        for (const e of pending) repo.markGmailDrafted(db, e.id);
-        return j({ drafted: n, to: pending.map(e => e.to_email) });
-      } catch (err) { return j({ error: String(err) }); }
+        // markGmailDrafted вызывается поштучно (onAppended) — сбой на середине не приведёт
+        // к повторной выгрузке уже добавленных при следующем draft_to_gmail.
+        const n = await appendToGmailDrafts(
+          cfg, pending.map(e => ({ id: e.id, to: e.to_email, subject: e.subject, body: e.body })),
+          { onAppended: (id) => { repo.markGmailDrafted(db, id); done.push(pending.find(e => e.id === id)!.to_email); } });
+        return j({ drafted: n, to: done });
+      } catch (err) { return j({ error: String(err), drafted: done.length, to: done }); }
     });
 
   return mcp;

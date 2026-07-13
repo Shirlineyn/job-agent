@@ -27,35 +27,45 @@ describe("appendToGmailDrafts", () => {
   beforeEach(() => { process.env.SMTP_PASSWORD = "app-pass"; });
   afterEach(() => { delete process.env.SMTP_PASSWORD; });
 
-  it("кладёт письма в локализованную папку черновиков с флагом \\Draft", async () => {
+  it("кладёт письма в локализованную папку черновиков с флагом \\Draft, помечает каждое", async () => {
     const client = fakeClient();
+    const marked: number[] = [];
     const n = await appendToGmailDrafts(cfg, [
-      { to: "hr@a.ru", subject: "S1", body: "B1" },
-      { to: "hr@b.ru", subject: "S2", body: "B2" },
-    ], () => client);
+      { id: 1, to: "hr@a.ru", subject: "S1", body: "B1" },
+      { id: 2, to: "hr@b.ru", subject: "S2", body: "B2" },
+    ], { makeClient: () => client, onAppended: (id) => marked.push(id) });
     expect(n).toBe(2);
     expect(client.appends).toHaveLength(2);
     expect(client.appends[0].box).toBe("[Gmail]/Черновики");
     expect(client.appends[0].flags).toContain("\\Draft");
+    expect(marked).toEqual([1, 2]);
     expect(client.logout).toHaveBeenCalled();
   });
 
   it("пустой список — без подключения", async () => {
     const make = vi.fn();
-    expect(await appendToGmailDrafts(cfg, [], make as never)).toBe(0);
+    expect(await appendToGmailDrafts(cfg, [], { makeClient: make as never })).toBe(0);
     expect(make).not.toHaveBeenCalled();
   });
 
   it("без SMTP_PASSWORD бросает понятную ошибку", async () => {
     delete process.env.SMTP_PASSWORD;
-    await expect(appendToGmailDrafts(cfg, [{ to: "x@y.ru", subject: "s", body: "b" }], () => fakeClient()))
+    await expect(appendToGmailDrafts(cfg, [{ id: 1, to: "x@y.ru", subject: "s", body: "b" }], { makeClient: () => fakeClient() }))
       .rejects.toThrow(/SMTP_PASSWORD/);
   });
 
-  it("logout вызывается даже при ошибке append", async () => {
+  it("сбой на середине пачки: помечены только успешно добавленные (нет дублей при ретрае)", async () => {
     const client = fakeClient();
-    client.append = vi.fn().mockRejectedValue(new Error("boom"));
-    await expect(appendToGmailDrafts(cfg, [{ to: "x@y.ru", subject: "s", body: "b" }], () => client)).rejects.toThrow("boom");
+    // первый APPEND успешен, второй падает
+    client.append = vi.fn()
+      .mockImplementationOnce((box: string) => { client.appends.push({ box }); return Promise.resolve(); })
+      .mockRejectedValueOnce(new Error("throttled"));
+    const marked: number[] = [];
+    await expect(appendToGmailDrafts(cfg, [
+      { id: 10, to: "a@a.ru", subject: "s", body: "b" },
+      { id: 20, to: "b@b.ru", subject: "s", body: "b" },
+    ], { makeClient: () => client, onAppended: (id) => marked.push(id) })).rejects.toThrow("throttled");
+    expect(marked).toEqual([10]);          // только первый помечен
     expect(client.logout).toHaveBeenCalled();
   });
 });
