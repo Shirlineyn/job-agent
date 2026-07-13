@@ -22,8 +22,13 @@
 ## Детали по площадкам
 
 ### hirehi.ru — приоритет 1
-- `GET https://hirehi.ru/api/search/jobs?query=python` → JSON, `total_count: 16089`, пагинация `page=` (27/стр), фильтры (удалёнка: 8 193, senior: 4 977).
-- `GET https://hirehi.ru/api/jobs/{id}` → полная карточка: `description`, `requirements`, `tasks_details`, `conditions_details`, `salary_display`, `format`, `level`, `skills_list`.
+- `GET https://hirehi.ru/api/search/jobs?search=python` → JSON, `total_count: 16174`, пагинация `page=` (27/стр), фильтры (удалёнка: 8 223, senior: 5 009).
+  **Уточнение (реализация задачи 4, 2026-07-13): параметр называется `search`, не `query`** — `query` API молча
+  игнорирует (выдача не фильтруется, `total_count` не меняется от слова к слову). Проверено curl'ом на нескольких
+  словах (`python`, `blockchain`, без параметра вовсе) — во всех случаях с `query=` результат идентичен.
+- `GET https://hirehi.ru/api/jobs/{id}` → полная карточка: `description`, `requirements`, `tasks_details`, `conditions_details`, `salary_display`, `format`, `level`, `skills_list`. Дата публикации в поиске — `created_at` (ISO datetime), поля `published_at` нет.
+- Ни в поиске, ни в карточке нет готового веб-URL. Реальный URL страницы — `/{category}/{seo-slug}-{id}`, но `seo-slug` нигде в API не отдаётся. Обходной путь (проверено curl'ом): `/{category}/<любой-текст>-{id}` отдаёт `301` на канонический URL, и даже с «неправильным» `category` итоговая страница рендерит верную вакансию (`200`) — редирект резолвится по `id`, не по `category`/`slug`. Адаптер строит URL как `/{category}/vacancy-{id}` — рабочая, хоть и не канонично-красивая ссылка.
+- `salary_display` в реальных данных чаще всего `~ N ₽` (примерная оценка, без «от»/«до») — большинство карточек, а не диапазон «от X до Y». Адаптер трактует одиночное число без «от»/«до» как `salary_from = salary_to = N` (по аналогии с парсингом hh.ru в `src/browser/hh.ts`).
 - Сам является агрегатором (телеграм-каналы + рекрутеры) → **нужна дедупликация с hh.ru**; механика отклика — отдельный вопрос (прямой ссылки на источник в карточке нет).
 - API неофициальный.
 
