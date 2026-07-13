@@ -78,6 +78,7 @@ export class HhBrowser {
         work_format: (/удал[её]нн/i.test(c.textContent ?? "") ? "remote" : /гибрид/i.test(c.textContent ?? "") ? "hybrid" : "unknown") as WorkFormat,
         experience: null, published_at: null,          // уточняются на странице вакансии
         raw_json: JSON.stringify({ card: c.textContent?.slice(0, 2000) }),
+        source: "hh",
       };
     }), SEL).then(list => list.filter(v => v.id));
   }

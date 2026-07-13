@@ -31,6 +31,8 @@ export interface VacancyRow {
   letter: string | null;
   applied_at: string | null;
   raw_json: string | null;
+  source: string;
+  dedup_key: string | null;
   updated_at: string;
 }
 
@@ -47,6 +49,7 @@ export interface VacancyInsert {
   experience: string | null;
   published_at: string | null;
   raw_json: string | null;
+  source: string;
 }
 
 export interface LlmCallInsert {

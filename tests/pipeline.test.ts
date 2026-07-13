@@ -10,7 +10,7 @@ import { join } from "node:path";
 
 const card = (id: string) => ({ id, url: `https://hh.ru/vacancy/${id}`, title: "AI engineer", employer_id: "e" + id,
   employer_name: "Acme" + id, salary_from: 250000, salary_to: null, currency: "RUR", work_format: "remote" as const,
-  experience: "between1And3", published_at: new Date().toISOString(), raw_json: "{}" });
+  experience: "between1And3", published_at: new Date().toISOString(), raw_json: "{}", source: "hh" });
 
 function deps(overrides: Partial<Deps> = {}): Deps {
   const db = openDb(":memory:");

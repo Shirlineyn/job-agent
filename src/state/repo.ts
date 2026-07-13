@@ -1,6 +1,7 @@
 // src/state/repo.ts
 import type { Database } from "better-sqlite3";
 import type { VacancyInsert, VacancyRow, VacancyStatus, LlmCallInsert, RunPatch } from "./types.js";
+import { dedupKey } from "./dedup.js";
 
 // Whitelist of columns that can be updated via setStatus
 const UPDATABLE_COLS = new Set<keyof VacancyRow>([
@@ -10,24 +11,30 @@ const UPDATABLE_COLS = new Set<keyof VacancyRow>([
 ]);
 
 export function upsertVacancy(db: Database, v: VacancyInsert): boolean {
+  const key = dedupKey(v.employer_name, v.title);
+  // hh — первичный источник: его вставляем всегда. Дубликат из нового источника
+  // (та же вакансия у того же работодателя, найденная где-то ещё) не вставляем —
+  // отклик по ней уже возможен через hh, а двойной скоринг жжёт бюджет.
+  if (v.source !== "hh") {
+    const dup = db.prepare(`SELECT 1 FROM vacancies WHERE dedup_key=? LIMIT 1`).get(key);
+    if (dup) return false;
+  }
   const insertVacancy = db.prepare(`INSERT OR IGNORE INTO vacancies
-    (id,url,title,employer_id,employer_name,salary_from,salary_to,currency,work_format,experience,published_at,raw_json)
-    VALUES (@id,@url,@title,@employer_id,@employer_name,@salary_from,@salary_to,@currency,@work_format,@experience,@published_at,@raw_json)`);
+    (id,url,title,employer_id,employer_name,salary_from,salary_to,currency,work_format,experience,published_at,raw_json,source,dedup_key)
+    VALUES (@id,@url,@title,@employer_id,@employer_name,@salary_from,@salary_to,@currency,@work_format,@experience,@published_at,@raw_json,@source,@key)`);
 
   // vacancies.employer_id has a FK to companies(employer_id) (see docs/db-schema.md),
   // but vacancies are discovered (and must be inserted) before any company research
   // happens — the companies row is normally created later, during the research step.
   // To satisfy the FK at discovery time we ensure a stub companies row exists first;
   // saveCompanyResearch() later fills in `research`/`researched_at` for the same row.
-  const run = db.transaction((row: VacancyInsert) => {
+  const run = db.transaction((row: VacancyInsert & { key: string }) => {
     if (row.employer_id != null) {
       db.prepare(`INSERT OR IGNORE INTO companies (employer_id, name) VALUES (@employer_id, @employer_name)`).run(row);
     }
     return insertVacancy.run(row);
   });
-
-  const r = run(v);
-  return r.changes > 0;
+  return run({ ...v, key }).changes > 0;
 }
 
 export function setStatus(db: Database, id: string, status: VacancyStatus, extra: Partial<VacancyRow> = {}): void {
