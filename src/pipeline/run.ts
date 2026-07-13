@@ -192,7 +192,10 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     for (const v of repo.getByStatus(db, "queued")) {
       if (v.source === "hh") continue;
       if (repo.getEmailByVacancy(db, v.id)) continue;
-      const contact = v.employer_id ? repo.getCompanyEmail(db, v.employer_id) : null;
+      // Ключ кэша должен совпадать с гейтом (stage 2): employer_id ?? employer_name.
+      // Иначе вакансия без employer_id проходит гейт (кэшируется по имени),
+      // но 3b молча бросает её в skipped/no_email (ищет только по id).
+      const contact = repo.getCompanyEmail(db, v.employer_id ?? v.employer_name);
       if (!contact?.email) { repo.setStatus(db, v.id, "skipped", { filter_reason: "no_email" }); continue; }
       try {
         let letter = v.letter;

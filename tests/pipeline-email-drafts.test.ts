@@ -45,6 +45,7 @@ describe("черновики писем", () => {
     expect(e.subject).toContain("LLM Engineer");
     expect(e.status).toBe("draft");
     expect(e.body.length).toBeGreaterThan(10);
+    expect(repo.getVacancy(db, "hirehi:1")!.letter).toBe(e.body);
     expect(deps.notify).toHaveBeenCalledWith(expect.stringContaining("1"));
   });
   it("повторный прогон не пересоздаёт и не перетирает черновик", async () => {
