@@ -9,6 +9,8 @@ import { loadConfig, saveConfig, ConfigSchema } from "../config.js";
 import { runSession, type Deps } from "../pipeline/run.js";
 import { tryAcquireRunLock, releaseRunLock } from "../run-lock.js";
 import { notify } from "../notify.js";
+import { makeMailer } from "../email/send.js";
+import { approveEmail } from "../email/approve.js";
 
 const j = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
@@ -54,6 +56,28 @@ function buildServer(db: Database, mkDeps: () => Promise<Deps>): McpServer {
     async ({ pattern, reason }) => { repo.addBlacklist(db, pattern, reason); return j({ blacklist: repo.getBlacklist(db) }); });
   mcp.tool("blacklist_remove", "Убрать из чёрного списка", { pattern: z.string() },
     async ({ pattern }) => { repo.removeBlacklist(db, pattern); return j({ blacklist: repo.getBlacklist(db) }); });
+
+  mcp.tool("get_email_queue", "Черновики писем HR, ждущие подтверждения", {}, async () =>
+    j(repo.getEmailsByStatus(db, "draft").map(e => {
+      const v = repo.getVacancy(db, e.vacancy_id);
+      return { id: e.id, vacancy_id: e.vacancy_id, title: v?.title, employer: v?.employer_name,
+        score: v?.score, url: v?.url, to: e.to_email, subject: e.subject, body: e.body };
+    })));
+  mcp.tool("update_email", "Поправить тему/текст черновика перед отправкой",
+    { id: z.number(), subject: z.string().optional(), body: z.string().optional() },
+    async ({ id, subject, body }) => { repo.updateEmailDraft(db, id, { subject, body }); return j({ updated: id }); });
+  mcp.tool("approve_email", "Подтвердить и ОТПРАВИТЬ письмо (реальная отправка на почту HR)",
+    { id: z.number() }, async ({ id }) => {
+      const cfg = loadConfig();
+      return j(await approveEmail(db, cfg, makeMailer(cfg), id));
+    });
+  mcp.tool("reject_email", "Отклонить черновик (вакансия → skipped)", { id: z.number() }, async ({ id }) => {
+    const e = repo.getEmailsByStatus(db, "draft").find(x => x.id === id);
+    if (!e) return j({ error: `draft ${id} not found` });
+    repo.markEmailRejected(db, id);
+    repo.setStatus(db, e.vacancy_id, "skipped", { filter_reason: "email_rejected" });
+    return j({ rejected: id });
+  });
 
   return mcp;
 }
