@@ -80,6 +80,7 @@ export interface EmailRow {
   status: EmailStatus;
   created_at: string;
   sent_at: string | null;
+  gmail_drafted_at: string | null;
 }
 
 export interface EmailInsert {

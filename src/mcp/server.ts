@@ -11,6 +11,7 @@ import { tryAcquireRunLock, releaseRunLock } from "../run-lock.js";
 import { notify } from "../notify.js";
 import { makeMailer } from "../email/send.js";
 import { approveEmail } from "../email/approve.js";
+import { appendToGmailDrafts } from "../email/gmailDraft.js";
 
 const j = (data: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] });
 
@@ -78,6 +79,17 @@ function buildServer(db: Database, mkDeps: () => Promise<Deps>): McpServer {
     repo.setStatus(db, e.vacancy_id, "skipped", { filter_reason: "email_rejected" });
     return j({ rejected: id });
   });
+  mcp.tool("draft_to_gmail", "Положить неотправленные черновики в папку «Черновики» Gmail (отправляешь сам)",
+    {}, async () => {
+      const cfg = loadConfig();
+      const pending = repo.getUndraftedEmails(db);
+      if (pending.length === 0) return j({ drafted: 0, note: "нет новых черновиков" });
+      try {
+        const n = await appendToGmailDrafts(cfg, pending.map(e => ({ to: e.to_email, subject: e.subject, body: e.body })));
+        for (const e of pending) repo.markGmailDrafted(db, e.id);
+        return j({ drafted: n, to: pending.map(e => e.to_email) });
+      } catch (err) { return j({ error: String(err) }); }
+    });
 
   return mcp;
 }

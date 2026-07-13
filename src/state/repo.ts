@@ -137,6 +137,13 @@ export function markEmailSent(db: Database, id: number): void {
 export function markEmailRejected(db: Database, id: number): void {
   db.prepare(`UPDATE emails SET status='rejected' WHERE id=?`).run(id);
 }
+// Черновики со статусом draft, ещё НЕ выгруженные в Черновики Gmail (для draft_to_gmail).
+export function getUndraftedEmails(db: Database): EmailRow[] {
+  return db.prepare(`SELECT * FROM emails WHERE status='draft' AND gmail_drafted_at IS NULL ORDER BY created_at`).all() as EmailRow[];
+}
+export function markGmailDrafted(db: Database, id: number): void {
+  db.prepare(`UPDATE emails SET gmail_drafted_at=datetime('now') WHERE id=?`).run(id);
+}
 export function emailsSentToday(db: Database): number {
   const r = db.prepare(`SELECT COUNT(*) n FROM emails WHERE status='sent'
     AND date(sent_at,'localtime')=date('now','localtime')`).get() as { n: number };
