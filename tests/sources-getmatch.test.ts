@@ -42,6 +42,23 @@ describe("getmatchSource", () => {
     expect(text).toContain("ML-пайплайны");
     expect(f).not.toHaveBeenCalled();
   });
+  it("битая запись (company: null) не валит весь батч — пропускается, остальные проходят", async () => {
+    const fixture = {
+      meta: { total: 2 },
+      offers: [
+        { id: 1, position: "Python Developer", company: { name: "Good Co" },
+          salary_display_from: null, salary_display_to: null, salary_currency: null,
+          offer_description: "<p>Python backend</p>", location_items: [], published_at: null, url: null },
+        { id: 2, position: "Python Broken", company: null,
+          salary_display_from: null, salary_display_to: null, salary_currency: null,
+          offer_description: "<p>Python broken record</p>", location_items: [], published_at: null, url: null },
+      ],
+    };
+    const f = vi.fn().mockResolvedValue(jsonRes(fixture));
+    const cards = await getmatchSource(f as never).search(["python"], {} as Config);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].id).toBe("getmatch:1");
+  });
   it("matchesKeywords ищет по позиции и описанию, без регистра", () => {
     expect(matchesKeywords("ML Engineer", "<p>деплой моделей</p>", ["python", "ml"])).toBe(true);
     expect(matchesKeywords("Бухгалтер", "<p>1С</p>", ["python", "ml"])).toBe(false);

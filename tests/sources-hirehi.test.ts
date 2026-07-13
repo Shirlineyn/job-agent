@@ -57,6 +57,22 @@ describe("hirehiSource", () => {
     const cards = await src.search(["python", "ml"], {} as Config);
     expect(cards).toHaveLength(1);
   }, 10_000);
+  it("битая запись (company: null) не валит весь батч — пропускается, остальные проходят", async () => {
+    const fixture = {
+      total_count: 2,
+      jobs: [
+        { id: 1, title: "OK Job", company: "Good Co", category: "dev", salary_display: null },
+        { id: 2, title: "Broken Job", company: null, category: "dev", salary_display: null },
+      ],
+    };
+    const f = vi.fn()
+      .mockResolvedValueOnce(jsonRes(fixture))
+      .mockResolvedValue(jsonRes({ total_count: 0, jobs: [] }));
+    const src = hirehiSource(f as never);
+    const cards = await src.search(["python"], {} as Config);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].id).toBe("hirehi:1");
+  });
   it("одиночную приблизительную зарплату (~N) трактует как from=to", async () => {
     const fixture = {
       total_count: 1,

@@ -19,7 +19,7 @@ import { getJson, politePause, stripHtml } from "./http.js";
 type TvVacancy = {
   id: string; "job-name": string; salary_min?: number | null; salary_max?: number | null;
   duty?: string; requirements?: string;
-  company: { name: string; email?: string; companycode?: string; inn?: string };
+  company: { name: string; email?: string; companycode?: string; inn?: string } | null;
   vac_url?: string; "creation-date"?: string; schedule?: string;
 };
 type TvResp = { status: string; results?: { vacancies?: { vacancy: TvVacancy }[] } };
@@ -44,6 +44,9 @@ export function trudvsemSource(f: Fetch = fetch): JobSource {
             `https://opendata.trudvsem.ru/api/v1/vacancies/region/77?text=${encodeURIComponent(kw)}&limit=100&offset=${page}`, TIMEOUT);
           const items = resp.results?.vacancies ?? [];
           for (const { vacancy: v } of items) {
+            // Битая запись без company.name — пропускаем ЭТУ запись, не роняем весь батч источника
+            // (throw оставляем только на неожиданную схему конверта ответа выше).
+            if (!v.company?.name) continue;
             const id = `trudvsem:${v.id}`;
             if (seen.has(id)) continue;
             seen.add(id);

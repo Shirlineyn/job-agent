@@ -91,6 +91,15 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     const blacklist = repo.getBlacklist(db);
     const scoreCap = 10 * cfg.dailyLimit;
     let scoredThisRun = 0;
+    // Предохранитель для не-hh fetchText, отдельно по каждому источнику: если источник лёг,
+    // каждая его discovered-строка иначе висит по 30-60с таймаута ПОСЛЕДОВАТЕЛЬНО без
+    // ограничителя (в отличие от hh-ветки, где guarded уже останавливает прогон после 5 подряд
+    // ошибок браузера). Здесь источники независимы — стопать весь прогон из-за одного лежащего
+    // источника не нужно, но и жечь минуты на заведомо мёртвый источник тоже нельзя: после 3
+    // подряд ошибок конкретного источника пропускаем остальные его строки без сетевого вызова
+    // (вакансии остаются discovered и попробуются в следующем прогоне). Успешный fetchText
+    // сбрасывает счётчик именно своего источника.
+    const sourceErrorStreak = new Map<string, number>();
     for (const v of repo.getByStatus(db, "discovered")) {
       if (scoredThisRun >= scoreCap) break;
       const verdict = applyHardFilters(v, cfg.filters, blacklist);
@@ -102,11 +111,15 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         if (t === "skip") { repo.setStatus(db, v.id, "failed"); continue; }
         text = t;
       } else {
+        if ((sourceErrorStreak.get(v.source) ?? 0) >= 3) continue;   // источник лежит — не долбим таймаутами дальше
         const src = deps.sources.find(x => x.name === v.source);
         if (!src) { repo.setStatus(db, v.id, "failed", { filter_reason: "source_disabled" }); continue; }
-        try { text = await src.fetchText(v); }
-        catch (e) {
+        try {
+          text = await src.fetchText(v);
+          sourceErrorStreak.set(v.source, 0);
+        } catch (e) {
           s.errors++;
+          sourceErrorStreak.set(v.source, (sourceErrorStreak.get(v.source) ?? 0) + 1);
           // транзиентная ошибка — оставляем discovered на следующий прогон
           if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
           continue;
@@ -116,8 +129,12 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
       try {
         const score = await scoreVacancy(ctx(v.id), deps.claude, cfg, deps.resume, text);
         s.scored++; llmErrors = 0;   // успех сбрасывает счётчик ПОДРЯД идущих ошибок
+        // Мержим, а не заменяем: raw_json может нести полезную нагрузку из источника
+        // (например, trudvsem кладёт туда email работодателя для будущего email-flow) —
+        // затирание raw_json целиком уничтожало бы её безвозвратно.
+        const mergedRaw = { ...(JSON.parse(v.raw_json ?? "{}") as object), text };
         repo.setStatus(db, v.id, score.score >= cfg.scoreThreshold ? "queued" : "skipped",
-          { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify({ text }) });
+          { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify(mergedRaw) });
       } catch (e) { s.errors++; if (!isTransient(e)) repo.setStatus(db, v.id, "failed"); if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; } }
     }
   }

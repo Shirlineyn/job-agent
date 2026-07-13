@@ -58,6 +58,30 @@ describe("trudvsemSource", () => {
     expect(cards).toEqual([]);
   });
 
+  it("битая запись (company: null) не валит весь батч — пропускается, остальные проходят", async () => {
+    const fixture = {
+      status: "200",
+      results: { vacancies: [
+        { vacancy: {
+          id: "good-1", "job-name": "Разработчик Python", duty: "<p>Разработка</p>", requirements: "Python",
+          company: { name: "Good Co", companycode: "111" },
+          "creation-date": "2026-07-08",
+        } },
+        { vacancy: {
+          id: "broken-1", "job-name": "Broken Job", duty: "<p>Broken</p>", requirements: "Python",
+          company: null,
+          "creation-date": "2026-07-08",
+        } },
+      ] },
+    };
+    const f = vi.fn()
+      .mockResolvedValueOnce(jsonRes(fixture))
+      .mockResolvedValue(jsonRes({ status: "200", results: {} }));
+    const cards = await trudvsemSource(f as never).search(["python"], {} as Config);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].id).toBe("trudvsem:good-1");
+  });
+
   it("регрессия: salary_min=0 и salary_max=0 → null (не вилка до 0₽)", async () => {
     const fixtureZeroSalary = {
       status: "200",

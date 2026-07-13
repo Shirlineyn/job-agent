@@ -16,7 +16,7 @@ import { getJson, politePause, stripHtml } from "./http.js";
 // salary_display_from/to, salary_currency и структура location_items:[{format}] совпали
 // с брифом без изменений.
 type Offer = {
-  id: number; position: string; company: { name: string };
+  id: number; position: string; company: { name: string } | null;
   salary_display_from: number | null; salary_display_to: number | null; salary_currency: string | null;
   offer_description: string | null; location_items: { format?: string }[];
   published_at: string | null; url?: string | null;
@@ -51,6 +51,9 @@ export function getmatchSource(f: Fetch = fetch): JobSource {
         const resp = await getJson<OffersResp>(f, `https://getmatch.ru/api/offers?limit=100&offset=${offset}`);
         if (!Array.isArray(resp.offers)) throw new Error("getmatch: неожиданная схема (нет offers)");
         for (const o of resp.offers) {
+          // Битая запись без company.name — пропускаем ЭТУ запись, не роняем весь батч источника
+          // (throw оставляем только на неожиданную схему конверта ответа выше).
+          if (!o.company?.name) continue;
           if (!matchesKeywords(o.position, o.offer_description ?? "", keywords)) continue;
           out.push({
             id: `getmatch:${o.id}`, url: absUrl(o.url, o.id), title: o.position,

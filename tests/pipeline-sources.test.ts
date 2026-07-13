@@ -59,6 +59,21 @@ describe("runSession с новыми источниками", () => {
     expect(s.errors).toBeGreaterThan(0);
     expect(s.stopReason).toBe("completed");
   });
+  it("регрессия: скоринг мержит raw_json, не затирая email из trudvsem", async () => {
+    const db = openDb(":memory:");
+    const tvCard: VacancyInsert = {
+      ...card("trudvsem:1", "trudvsem", "Разработчик Python"),
+      raw_json: JSON.stringify({ text: "текст вакансии trudvsem", email: "hr@x.ru" }),
+    };
+    const src = fakeSource("trudvsem", [tvCard]);
+    const deps = mkDeps(db, [src]);
+    const s = await runSession(deps, "manual", "dry_run");
+    expect(s.scored).toBe(1);
+    const v = repo.getVacancy(db, "trudvsem:1")!;
+    const raw = JSON.parse(v.raw_json ?? "{}") as { text?: string; email?: string };
+    expect(raw.email).toBe("hr@x.ru");
+    expect(raw.text).toBeTruthy();
+  });
   it("не-hh вакансии не попадают в браузерный apply", async () => {
     const db = openDb(":memory:");
     repo.upsertVacancy(db, card("hirehi:3", "hirehi", "AI Engineer"));

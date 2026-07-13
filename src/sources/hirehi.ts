@@ -16,7 +16,7 @@ import { getJson, politePause, stripHtml } from "./http.js";
 //   страница отдаёт 200 по чистому id). Поэтому строим URL как /{category}/vacancy-{id} —
 //   он реален и рабочий (редиректит/рендерит), даже если category неточный.
 type HirehiJob = {
-  id: number; title: string; company: string; category?: string | null;
+  id: number; title: string; company: string | null; category?: string | null;
   salary_display?: string | null; format?: string | null; level?: string | null;
   created_at?: string | null;
 };
@@ -59,6 +59,9 @@ export function hirehiSource(f: Fetch = fetch): JobSource {
           const resp = await getJson<SearchResp>(f, `https://hirehi.ru/api/search/jobs?search=${encodeURIComponent(kw)}&page=${page}`);
           if (!Array.isArray(resp.jobs)) throw new Error(`hirehi: неожиданная схема ответа (нет jobs)`);
           for (const j of resp.jobs) {
+            // Битая запись без company — пропускаем ЭТУ запись, не роняем весь батч источника
+            // (throw оставляем только на неожиданную схему конверта ответа выше).
+            if (!j.company) continue;
             const id = `hirehi:${j.id}`;
             if (seen.has(id)) continue;
             seen.add(id);
