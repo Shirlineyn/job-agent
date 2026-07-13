@@ -32,6 +32,12 @@ export class HhBrowser {
     this.ctx = await chromium.launchPersistentContext(profileDir, { headless: false, viewport: null });
     this.ctx.on("close", () => { this.closed = true; });
     this.page = this.ctx.pages()[0] ?? await this.ctx.newPage();
+    // Жёсткие потолки, чтобы ни одна операция страницы не подвисала на минуты (наблюдали 9-мин
+    // hang после анкеты — вероятно, goto залипал на beforeunload-диалоге формы). Теперь любая
+    // операция истекает за 45с → ошибка → guarded → skip, сессия идёт дальше, а не виснет.
+    this.page.setDefaultTimeout(45_000);
+    this.page.setDefaultNavigationTimeout(45_000);
+    this.page.on("dialog", d => void d.dismiss().catch(() => {}));   // авто-дисмисс «Покинуть страницу?» и пр.
   }
   async close(): Promise<void> { await this.ctx.close(); }
 
