@@ -185,6 +185,37 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     }
   }
 
+  // 3b) черновики писем для не-hh queued: research → письмо → emails(draft).
+  // Отправки здесь НЕТ — только очередь на ручное подтверждение (approve_email в MCP).
+  if (s.stopReason === "completed" || s.stopReason === "daily_limit") {
+    let drafts = 0;
+    for (const v of repo.getByStatus(db, "queued")) {
+      if (v.source === "hh") continue;
+      if (repo.getEmailByVacancy(db, v.id)) continue;
+      const contact = v.employer_id ? repo.getCompanyEmail(db, v.employer_id) : null;
+      if (!contact?.email) { repo.setStatus(db, v.id, "skipped", { filter_reason: "no_email" }); continue; }
+      try {
+        let letter = v.letter;
+        if (!letter) {
+          const research = await researchCompany(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name);
+          const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
+          letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") });
+          repo.setStatus(db, v.id, "queued", { letter });
+        }
+        repo.insertEmailDraft(db, {
+          vacancy_id: v.id, to_email: contact.email,
+          subject: `Отклик на вакансию «${v.title}» — Александр Доронин`, body: letter,
+        });
+        drafts++; llmErrors = 0;
+      } catch (e) {
+        s.errors++;
+        if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
+        if (++llmErrors >= 5) { s.stopReason = "error_streak"; break; }
+      }
+    }
+    if (drafts > 0) deps.notify(`hh-agent: ${drafts} новых писем ждут подтверждения (get_email_queue)`);
+  }
+
   repo.finishRun(db, runId, { discovered: s.discovered, filtered_out: s.filteredOut, scored: s.scored, applied: s.applied, errors: s.errors, stop_reason: s.stopReason });
   return s;
 }
