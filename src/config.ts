@@ -51,6 +51,10 @@ export const ConfigSchema = z.object({
     })
     .default({ host: "smtp.gmail.com", port: 465, user: "doronin.alex001@gmail.com", fromName: "Александр Доронин" }),
   resumePdfPath: z.string().nullable().default(null),
+  // Ссылка на открытый код пайплайна в холодных письмах (вариант «агент как доказательство»).
+  // null, пока репозиторий не опубликован (иначе получатель кликнет в 404); после публикации —
+  // выставить URL, и email-письма начнут ссылаться на него.
+  repoUrl: z.string().nullable().default(null),
   schedule: z.array(z.string()).default(["0 10 * * *", "30 15 * * *"]),
   applyPauseMs: z.tuple([z.number(), z.number()]).default([180000, 420000]),
   anthropicModel: z.string().default("claude-sonnet-5"),

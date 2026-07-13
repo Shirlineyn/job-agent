@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateLetter } from "../src/llm/letter.js";
+import { EMAIL_LETTER_SYSTEM_V1 } from "../src/llm/prompts.js";
 
 const ok = "Здравствуйте! " + "Я ИИ-агент, действующий по поручению Александра Доронина. ".repeat(1) +
   "слово ".repeat(130) + "С уважением, ИИ-агент Александра Доронина, doronin.alex001@gmail.com";
@@ -19,5 +20,22 @@ describe("validateLetter", () => {
   });
   it("rejects lookalike domains", () => {
     expect(validateLetter(ok + " http://eviltedo.ru/x").ok).toBe(false);
+  });
+});
+
+describe("EMAIL_LETTER_SYSTEM_V1", () => {
+  const url = "https://github.com/Shirlineyn/job-agent";
+  it("вставляет ссылку на репозиторий, когда repoUrl задан", () => {
+    const p = EMAIL_LETTER_SYSTEM_V1(url);
+    expect(p).toContain(url);
+    expect(p).toContain("Единственная допустимая ссылка");
+  });
+  it("без repoUrl не добавляет URL и запрещает ссылки", () => {
+    const p = EMAIL_LETTER_SYSTEM_V1(null);
+    expect(p).not.toContain("http");
+    expect(p).toContain("Не добавляй в письмо никаких URL");
+  });
+  it("запрещает открывать письмо мета-рамкой (не спам-зачин)", () => {
+    expect(EMAIL_LETTER_SYSTEM_V1(null)).toMatch(/ПЕРВАЯ фраза/);
   });
 });

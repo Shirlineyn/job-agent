@@ -202,7 +202,7 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
         if (!letter) {
           const research = await researchCompany(ctx(v.id), deps.pplx, cfg, v.employer_id ?? v.employer_name, v.employer_name);
           const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
-          letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") });
+          letter = await writeLetter(ctx(v.id), deps.claude, cfg, { resume: deps.resume, vacancyText: text, research, score: JSON.parse(v.score_reasons ?? "{}") }, "email");
           repo.setStatus(db, v.id, "queued", { letter });
         }
         repo.insertEmailDraft(db, {
