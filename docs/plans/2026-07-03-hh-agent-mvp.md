@@ -1442,7 +1442,7 @@ git add -A && git commit -m "feat: mcp server with 10 tools, wired entrypoint"
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.aleksandr.hh-agent</string>
-  <key>WorkingDirectory</key><string>/Users/adoronin001/Shirlineyn_Folder/Personal/projects/hh-agent</string>
+  <key>WorkingDirectory</key><string>/Users/<you>/path/to/hh-agent</string>
   <key>ProgramArguments</key><array>
     <string>/usr/local/bin/node</string>
     <string>dist/index.js</string>
