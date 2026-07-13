@@ -28,6 +28,7 @@ function deps(overrides: Partial<Deps> = {}): Deps {
       : "Здравствуйте! Я ИИ-агент, действующий по поручению Александра Доронина. " + "слово ".repeat(130) + "Доронин") as never,
     pplx: vi.fn(async () => "справка о компании") as never,
     notify: vi.fn(),
+    sources: [],
     ...overrides,
   };
 }

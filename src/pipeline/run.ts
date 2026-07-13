@@ -11,6 +11,7 @@ import { sleep } from "../browser/humanize.js";
 import type { Config } from "../config.js";
 import type { callClaude } from "../llm/anthropic.js";
 import type { callPerplexity } from "../llm/perplexity.js";
+import type { JobSource } from "../sources/types.js";
 
 // Транзиентный сбой (API-хиккап: Perplexity/Anthropic 403/408/429/5xx, timeout, сеть)
 // стоит повторить в СЛЕДУЮЩЕЙ сессии, а не помечать вакансию failed навсегда. Контентные
@@ -23,7 +24,7 @@ function isTransient(e: unknown): boolean {
 }
 
 export type BrowserPort = Pick<HhBrowser, "searchVacancies" | "fetchVacancyText" | "apply" | "waitCaptchaCleared">;
-export type Deps = { db: Database; cfg: Config; browser: BrowserPort; claude: typeof callClaude; pplx: typeof callPerplexity; notify: (msg: string) => void; resume: string };
+export type Deps = { db: Database; cfg: Config; browser: BrowserPort; claude: typeof callClaude; pplx: typeof callPerplexity; notify: (msg: string) => void; resume: string; sources: JobSource[] };
 export type RunSummary = { runId: number; discovered: number; filteredOut: number; scored: number; applied: number; errors: number; stopReason: string };
 
 export async function runSession(deps: Deps, trigger: "schedule" | "manual", modeOverride?: "live" | "dry_run"): Promise<RunSummary> {
@@ -68,6 +69,20 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
     if (rec !== "stop" && rec !== "skip") for (const card of rec) if (repo.upsertVacancy(db, card)) s.discovered++;
   }
 
+  // 1b) ingest из HTTP-источников: браузер не нужен, ошибка одного источника — не повод
+  // останавливать прогон (hh-часть уже отработала, остальные источники независимы). Стадия
+  // выполняется вне зависимости от stopReason стадии 1 (даже после captcha/logged_out) —
+  // именно поэтому она вставлена между стадиями 1 и 2 без обёртки в if (stopReason === "completed").
+  for (const src of deps.sources) {
+    try {
+      const cards = await src.search(cfg.sourceKeywords, cfg);
+      for (const c of cards) if (repo.upsertVacancy(db, c)) s.discovered++;
+    } catch (e) {
+      s.errors++;
+      console.error(`[run ${runId}] source ${src.name} failed: ${String(e).slice(0, 200)}`);
+    }
+  }
+
   // 2) filter + score. Потолок скоринга за прогон = 10 × dailyLimit — этого хватает набрать
   // очередь на дневной лимит, но не сканим весь бэклог разом (капча/бюджет); остаток остаётся
   // discovered на следующий прогон. Исчерпали бэклог раньше потолка — просто идём в apply
@@ -80,9 +95,23 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
       if (scoredThisRun >= scoreCap) break;
       const verdict = applyHardFilters(v, cfg.filters, blacklist);
       if (!verdict.pass) { repo.setStatus(db, v.id, "filtered_out", { filter_reason: verdict.reason }); s.filteredOut++; continue; }
-      const text = await guarded(() => deps.browser.fetchVacancyText(v.url));
-      if (text === "stop") break;
-      if (text === "skip") { repo.setStatus(db, v.id, "failed"); continue; }
+      let text: string;
+      if (v.source === "hh") {
+        const t = await guarded(() => deps.browser.fetchVacancyText(v.url));
+        if (t === "stop") break;
+        if (t === "skip") { repo.setStatus(db, v.id, "failed"); continue; }
+        text = t;
+      } else {
+        const src = deps.sources.find(x => x.name === v.source);
+        if (!src) { repo.setStatus(db, v.id, "failed", { filter_reason: "source_disabled" }); continue; }
+        try { text = await src.fetchText(v); }
+        catch (e) {
+          s.errors++;
+          // транзиентная ошибка — оставляем discovered на следующий прогон
+          if (!isTransient(e)) repo.setStatus(db, v.id, "failed");
+          continue;
+        }
+      }
       scoredThisRun++;
       try {
         const score = await scoreVacancy(ctx(v.id), deps.claude, cfg, deps.resume, text);
@@ -96,6 +125,8 @@ export async function runSession(deps: Deps, trigger: "schedule" | "manual", mod
   // 3) apply (перемешанная очередь, лимит из БД)
   if (s.stopReason === "completed") {
     for (const v of repo.getByStatus(db, "queued").sort(() => Math.random() - 0.5)) {
+      // Отклик умеем делать только на hh (браузер). Не-hh queued ждут email-flow (отдельный план).
+      if (v.source !== "hh") continue;
       if (repo.appliedToday(db) >= cfg.dailyLimit) { s.stopReason = "daily_limit"; break; }
       try {
         // Письмо генерируем только один раз: если оно уже есть (прошлая dry-run сессия),
