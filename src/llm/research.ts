@@ -18,7 +18,7 @@ export async function researchCompany(
     return cached.research;
   const research = await pplx(ctx, {
     model: cfg.perplexityModel,
-    prompt: RESEARCH_PROMPT_V1(name, "Москва"),
+    prompt: RESEARCH_PROMPT_V1(name, cfg.candidate.city),
     purpose: "research",
   });
   repo.saveCompanyResearch(ctx.db, employerId, name, research);

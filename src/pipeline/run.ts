@@ -347,7 +347,7 @@ export async function runSession(
         repo.insertEmailDraft(db, {
           vacancy_id: v.id,
           to_email: contact.email,
-          subject: `Отклик на вакансию «${v.title}» — Александр Доронин`,
+          subject: `Отклик на вакансию «${v.title}» — ${cfg.candidate.name}`,
           body: letter,
         });
         drafts++;

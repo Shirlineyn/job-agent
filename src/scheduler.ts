@@ -41,7 +41,7 @@ export function startScheduler(mkDeps: () => Promise<Deps>, cfg: Config): void {
           releaseRunLock();
         }
       },
-      { timezone: "Europe/Moscow" },
+      { timezone: cfg.timezone },
     );
   }
   log.info(`armed: ${cfg.schedule.join(" | ")}`);
