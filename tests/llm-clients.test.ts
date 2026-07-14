@@ -13,24 +13,34 @@ describe("cost", () => {
     expect(usdRead).toBeCloseTo((100 * 3 + 8000 * 0.1 * 3 + 200 * 15) / 1_000_000, 12);
   });
   it("defaults cache tokens to 0 (backwards compatible)", () => {
-    expect(cost("claude-sonnet-5", 100, 200)).toBeCloseTo(cost("claude-sonnet-5", 100, 200, 0, 0), 12);
+    expect(cost("claude-sonnet-5", 100, 200)).toBeCloseTo(
+      cost("claude-sonnet-5", 100, 200, 0, 0),
+      12,
+    );
   });
 });
 
 describe("withRetry", () => {
   it("retries retryable errors up to 3 attempts then succeeds", async () => {
     let n = 0;
-    const fn = vi.fn(async () => { if (++n < 3) throw Object.assign(new Error("overloaded"), { status: 529 }); return "ok"; });
+    const fn = vi.fn(async () => {
+      if (++n < 3) throw Object.assign(new Error("overloaded"), { status: 529 });
+      return "ok";
+    });
     expect(await withRetry(fn, () => {})).toBe("ok");
     expect(fn).toHaveBeenCalledTimes(3);
   });
   it("throws after 3 failures", async () => {
-    const fn = vi.fn(async () => { throw Object.assign(new Error("boom"), { status: 500 }); });
+    const fn = vi.fn(async () => {
+      throw Object.assign(new Error("boom"), { status: 500 });
+    });
     await expect(withRetry(fn, () => {})).rejects.toThrow("boom");
     expect(fn).toHaveBeenCalledTimes(3);
   });
   it("does not retry 400", async () => {
-    const fn = vi.fn(async () => { throw Object.assign(new Error("bad"), { status: 400 }); });
+    const fn = vi.fn(async () => {
+      throw Object.assign(new Error("bad"), { status: 400 });
+    });
     await expect(withRetry(fn, () => {})).rejects.toThrow("bad");
     expect(fn).toHaveBeenCalledTimes(1);
   });

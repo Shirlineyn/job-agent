@@ -2,8 +2,11 @@ import { describe, it, expect } from "vitest";
 import { validateLetter } from "../src/llm/letter.js";
 import { EMAIL_LETTER_SYSTEM_V1 } from "../src/llm/prompts.js";
 
-const ok = "Здравствуйте! " + "Я ИИ-агент, действующий по поручению Александра Доронина. ".repeat(1) +
-  "слово ".repeat(130) + "С уважением, ИИ-агент Александра Доронина, doronin.alex001@gmail.com";
+const ok =
+  "Здравствуйте! " +
+  "Я ИИ-агент, действующий по поручению Александра Доронина. ".repeat(1) +
+  "слово ".repeat(130) +
+  "С уважением, ИИ-агент Александра Доронина, doronin.alex001@gmail.com";
 
 describe("validateLetter", () => {
   it("accepts a well-formed letter", () => {

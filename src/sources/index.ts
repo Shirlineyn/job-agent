@@ -7,10 +7,15 @@ import { habrSource } from "./habr.js";
 import { getmatchSource } from "./getmatch.js";
 import { trudvsemSource } from "./trudvsem.js";
 
-const ALL: Record<string, (f: Fetch) => JobSource> = {
-  hirehi: hirehiSource, habr: habrSource, getmatch: getmatchSource, trudvsem: trudvsemSource,
+type SourceName = Config["enabledSources"][number];
+
+const ALL: Record<SourceName, (f: Fetch) => JobSource> = {
+  hirehi: hirehiSource,
+  habr: habrSource,
+  getmatch: getmatchSource,
+  trudvsem: trudvsemSource,
 };
 
 export function buildSources(cfg: Config, f: Fetch = fetch): JobSource[] {
-  return cfg.enabledSources.map(name => ALL[name](f));
+  return cfg.enabledSources.map((name) => ALL[name](f));
 }

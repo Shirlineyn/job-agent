@@ -24,7 +24,9 @@ describe("findCompanyEmail", () => {
   it("payload-почта сохраняется без вызова Perplexity", async () => {
     const db = openDb(":memory:");
     const pplx = vi.fn();
-    expect(await findCompanyEmail(ctx(db), pplx as never, cfg, "t:1", "ЦПЛ", "hr@cpl.ru")).toBe("hr@cpl.ru");
+    expect(await findCompanyEmail(ctx(db), pplx as never, cfg, "t:1", "ЦПЛ", "hr@cpl.ru")).toBe(
+      "hr@cpl.ru",
+    );
     expect(pplx).not.toHaveBeenCalled();
     expect(repo.getCompanyEmail(db, "t:1")).toMatchObject({ email: "hr@cpl.ru" });
   });
@@ -38,8 +40,12 @@ describe("findCompanyEmail", () => {
   it("кэш пуст → Perplexity, результат кэшируется", async () => {
     const db = openDb(":memory:");
     const pplx = vi.fn().mockResolvedValue('{"email": "career@gamma.ru"}');
-    expect(await findCompanyEmail(ctx(db), pplx as never, cfg, "h:3", "Gamma")).toBe("career@gamma.ru");
-    expect(await findCompanyEmail(ctx(db), pplx as never, cfg, "h:3", "Gamma")).toBe("career@gamma.ru");
+    expect(await findCompanyEmail(ctx(db), pplx as never, cfg, "h:3", "Gamma")).toBe(
+      "career@gamma.ru",
+    );
+    expect(await findCompanyEmail(ctx(db), pplx as never, cfg, "h:3", "Gamma")).toBe(
+      "career@gamma.ru",
+    );
     expect(pplx).toHaveBeenCalledTimes(1);
   });
   it("Perplexity не нашла → кэшируем not_found", async () => {

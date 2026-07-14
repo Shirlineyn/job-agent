@@ -19,9 +19,20 @@ const db = openDb(join(DIR, "state.db"));
 
 let browser: HhBrowser | null = null;
 async function mkDeps(): Promise<Deps> {
-  if (!browser || !browser.isAlive()) { browser = new HhBrowser(); await browser.launch(join(DIR, "profile")); }
-  return { db, cfg: loadConfig(), browser, claude: callClaude, pplx: callPerplexity, notify,
-    resume: readFileSync(loadConfig().resumePath, "utf8"), sources: buildSources(loadConfig()) };
+  if (!browser?.isAlive()) {
+    browser = new HhBrowser();
+    await browser.launch(join(DIR, "profile"));
+  }
+  return {
+    db,
+    cfg: loadConfig(),
+    browser,
+    claude: callClaude,
+    pplx: callPerplexity,
+    notify,
+    resume: readFileSync(loadConfig().resumePath, "utf8"),
+    sources: buildSources(loadConfig()),
+  };
 }
 
 startMcp(db, mkDeps, cfg.port);

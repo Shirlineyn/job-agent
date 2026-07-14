@@ -13,14 +13,19 @@ export function validateLetter(text: string): { ok: boolean; problems: string[] 
   const problems: string[] = [];
   const words = text.trim().split(/\s+/).length;
   if (words < 100 || words > 220) problems.push(`word count ${words}, expected 120-180`);
-  for (const m of text.matchAll(/https?:\/\/([^\s/]+)/g))
-    if (!URL_WHITELIST.some(d => m[1] === d || m[1].endsWith("." + d))) problems.push(`foreign url: ${m[1]}`);
+  for (const m of text.matchAll(/https?:\/\/([^\s/]+)/g)) {
+    const host = m[1];
+    if (host && !URL_WHITELIST.some((d) => host === d || host.endsWith("." + d)))
+      problems.push(`foreign url: ${host}`);
+  }
   if (!text.includes("Доронин")) problems.push("no signature");
   return { ok: problems.length === 0, problems };
 }
 
 export async function writeLetter(
-  ctx: LlmLogCtx, claude: typeof callClaude, cfg: Config,
+  ctx: LlmLogCtx,
+  claude: typeof callClaude,
+  cfg: Config,
   args: { resume: string; vacancyText: string; research: string; score: ScoreResult },
   channel: LetterChannel = "platform",
 ): Promise<string> {
@@ -30,14 +35,31 @@ export async function writeLetter(
   const systemPrompt = channel === "email" ? EMAIL_LETTER_SYSTEM_V1(cfg.repoUrl) : LETTER_SYSTEM_V2;
   const system = [systemPrompt, `<резюме>\n${args.resume}\n</резюме>`];
   const user = `<вакансия>\n${args.vacancyText}\n</вакансия>\n<справка_о_компании>\n${args.research}\n</справка_о_компании>\n<сильные_пересечения>\n${args.score.reasons.join("\n")}\n</сильные_пересечения>`;
-  const letter = (await claude(ctx, { model: cfg.anthropicModel, system, user, maxTokens: 1024, purpose: "letter" })).trim();
+  const letter = (
+    await claude(ctx, {
+      model: cfg.anthropicModel,
+      system,
+      user,
+      maxTokens: 1024,
+      purpose: "letter",
+    })
+  ).trim();
   const check = validateLetter(letter);
   if (!check.ok) {
-    const retry = (await claude(ctx, { model: cfg.anthropicModel, system,
-      user: user + `\nПредыдущее письмо отклонено проверкой: ${check.problems.join("; ")}. Исправь и верни только текст письма.`,
-      maxTokens: 1024, purpose: "letter" })).trim();
+    const retry = (
+      await claude(ctx, {
+        model: cfg.anthropicModel,
+        system,
+        user:
+          user +
+          `\nПредыдущее письмо отклонено проверкой: ${check.problems.join("; ")}. Исправь и верни только текст письма.`,
+        maxTokens: 1024,
+        purpose: "letter",
+      })
+    ).trim();
     const check2 = validateLetter(retry);
-    if (!check2.ok) throw new Error(`letter failed validation twice: ${check2.problems.join("; ")}`);
+    if (!check2.ok)
+      throw new Error(`letter failed validation twice: ${check2.problems.join("; ")}`);
     return retry;
   }
   return letter;

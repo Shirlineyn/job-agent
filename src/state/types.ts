@@ -1,13 +1,7 @@
 // src/state/types.ts
 
 export type VacancyStatus =
-  | "discovered"
-  | "filtered_out"
-  | "scored"
-  | "skipped"
-  | "queued"
-  | "applied"
-  | "failed";
+  "discovered" | "filtered_out" | "scored" | "skipped" | "queued" | "applied" | "failed";
 
 export type WorkFormat = "office" | "hybrid" | "remote" | "unknown";
 
