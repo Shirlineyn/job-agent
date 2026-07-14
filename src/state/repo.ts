@@ -223,6 +223,9 @@ export function getEmailByVacancy(db: Database, vacancyId: string): EmailRow | u
   return db.prepare(`SELECT * FROM emails WHERE vacancy_id=?`).get(vacancyId) as
     EmailRow | undefined;
 }
+export function getEmailById(db: Database, id: number): EmailRow | undefined {
+  return db.prepare(`SELECT * FROM emails WHERE id=?`).get(id) as EmailRow | undefined;
+}
 export function getEmailsByStatus(db: Database, status: EmailStatus): EmailRow[] {
   return db
     .prepare(`SELECT * FROM emails WHERE status=? ORDER BY created_at`)

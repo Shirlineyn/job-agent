@@ -23,15 +23,16 @@ async function mkDeps(): Promise<Deps> {
     browser = new HhBrowser();
     await browser.launch(join(DIR, "profile"));
   }
+  const freshCfg = loadConfig();
   return {
     db,
-    cfg: loadConfig(),
+    cfg: freshCfg,
     browser,
     claude: callClaude,
     pplx: callPerplexity,
     notify,
-    resume: readFileSync(loadConfig().resumePath, "utf8"),
-    sources: buildSources(loadConfig()),
+    resume: readFileSync(freshCfg.resumePath, "utf8"),
+    sources: buildSources(freshCfg),
   };
 }
 

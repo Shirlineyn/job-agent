@@ -13,16 +13,7 @@ export async function approveEmail(
   mailer: Mailer,
   id: number,
 ): Promise<{ ok: true } | { error: string }> {
-  const e = db.prepare(`SELECT * FROM emails WHERE id=?`).get(id) as
-    | {
-        id: number;
-        vacancy_id: string;
-        to_email: string;
-        subject: string;
-        body: string;
-        status: string;
-      }
-    | undefined;
+  const e = repo.getEmailById(db, id);
   if (!e) return { error: `email ${id} not found` };
   if (e.status !== "draft") return { error: `email ${id} is ${e.status}, not draft` };
   if (repo.emailsSentToday(db) >= cfg.emailDailyLimit)
