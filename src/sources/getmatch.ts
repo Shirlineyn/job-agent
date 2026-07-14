@@ -3,6 +3,7 @@ import type { VacancyInsert, VacancyRow, WorkFormat } from "../state/types.js";
 import type { Fetch } from "./http.js";
 import type { JobSource } from "./types.js";
 import { getJson, politePause, stripHtml } from "./http.js";
+import { parseWorkFormat, fetchTextFromRawJson } from "./shared.js";
 
 // Реальная схема API (curl-сверка 2026-07-13, docs/job-boards-research.md) отличается от
 // исходной фикстуры задачи в двух местах:
@@ -43,11 +44,7 @@ export function matchesKeywords(
 }
 
 function fmt(items: { format?: string }[]): WorkFormat {
-  const fs = items.map((i) => i.format ?? "");
-  if (fs.some((x) => /remote/i.test(x))) return "remote";
-  if (fs.some((x) => /hybrid/i.test(x))) return "hybrid";
-  if (fs.some((x) => /office/i.test(x))) return "office";
-  return "unknown";
+  return parseWorkFormat(items.map((i) => i.format ?? "").join(" "));
 }
 
 function absUrl(url: string | null | undefined, id: number): string {
@@ -94,10 +91,8 @@ export function getmatchSource(f: Fetch = fetch): JobSource {
       }
       return out;
     },
-    async fetchText(v: VacancyRow): Promise<string> {
-      const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text;
-      if (!text) throw new Error(`getmatch: нет текста в raw_json для ${v.id}`);
-      return text;
+    fetchText(v: VacancyRow): Promise<string> {
+      return Promise.resolve(fetchTextFromRawJson(v, "getmatch"));
     },
   };
 }

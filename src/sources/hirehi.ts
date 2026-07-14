@@ -1,8 +1,9 @@
 import type { Config } from "../config.js";
-import type { VacancyInsert, VacancyRow, WorkFormat } from "../state/types.js";
+import type { VacancyInsert, VacancyRow } from "../state/types.js";
 import type { Fetch } from "./http.js";
 import type { JobSource } from "./types.js";
 import { getJson, politePause, stripHtml } from "./http.js";
+import { parseWorkFormat } from "./shared.js";
 
 // Реальная схема API (curl-сверка 2026-07-13, docs/job-boards-research.md) отличается от
 // исходной фикстуры задачи:
@@ -54,14 +55,6 @@ export function parseSalary(s: string | null | undefined): {
   return { from: nums[0] ?? null, to: nums[1] ?? nums[0] ?? null };
 }
 
-export function parseFormat(s: string | null | undefined): WorkFormat {
-  if (!s) return "unknown";
-  if (/удал|remote/i.test(s)) return "remote";
-  if (/гибрид|hybrid/i.test(s)) return "hybrid";
-  if (/офис|office/i.test(s)) return "office";
-  return "unknown";
-}
-
 const PAGES_PER_KEYWORD = 2; // ~54 свежих вакансии на слово; глубже — старьё и дубли
 
 export function hirehiSource(f: Fetch = fetch): JobSource {
@@ -95,7 +88,7 @@ export function hirehiSource(f: Fetch = fetch): JobSource {
               salary_from: sal.from,
               salary_to: sal.to,
               currency: sal.from || sal.to ? "RUR" : null,
-              work_format: parseFormat(j.format),
+              work_format: parseWorkFormat(j.format),
               experience: null,
               published_at: j.created_at ?? null,
               raw_json: JSON.stringify(j),

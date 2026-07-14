@@ -3,6 +3,7 @@ import type { VacancyInsert, VacancyRow, WorkFormat } from "../state/types.js";
 import type { Fetch } from "./http.js";
 import type { JobSource } from "./types.js";
 import { getJson, politePause, stripHtml } from "./http.js";
+import { fetchTextFromRawJson } from "./shared.js";
 
 // Реальная схема API (curl-сверка 2026-07-13, docs/job-boards-research.md, раздел trudvsem)
 // отличается от исходной фикстуры брифа в одном месте:
@@ -86,10 +87,8 @@ export function trudvsemSource(f: Fetch = fetch): JobSource {
       }
       return out;
     },
-    async fetchText(v: VacancyRow): Promise<string> {
-      const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text;
-      if (!text) throw new Error(`trudvsem: нет текста в raw_json для ${v.id}`);
-      return text;
+    fetchText(v: VacancyRow): Promise<string> {
+      return Promise.resolve(fetchTextFromRawJson(v, "trudvsem"));
     },
   };
 }
