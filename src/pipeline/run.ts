@@ -4,7 +4,7 @@ import * as repo from "../state/repo.js";
 import { applyHardFilters } from "../filters.js";
 import { scoreVacancy, type ScoreResult } from "../llm/scoring.js";
 import { researchCompany } from "../llm/research.js";
-import { writeLetter } from "../llm/letter.js";
+import { writeLetter, type LetterChannel } from "../llm/letter.js";
 import { answerQuestionnaire } from "../llm/questionnaire.js";
 import { findCompanyEmail } from "../llm/emailSearch.js";
 import { CaptchaDetected, LoggedOut, type HhBrowser } from "../browser/hh.js";
@@ -14,6 +14,43 @@ import type { Config } from "../config.js";
 import type { callClaude } from "../llm/anthropic.js";
 import type { callPerplexity } from "../llm/perplexity.js";
 import type { JobSource } from "../sources/types.js";
+import type { LlmLogCtx } from "../llm/log.js";
+import type { VacancyRow } from "../state/types.js";
+
+// Генерация письма — общий шаг стадий apply (3) и email-drafts (3b): если письмо уже есть
+// (прошлая dry-run сессия), не переписываем — иначе жжём LLM-бюджет и затираем проверенный
+// пользователем текст. generated=true сигналит вызывающему сбросить счётчик подряд-ошибок.
+async function ensureLetter(
+  deps: Deps,
+  ctx: (vacancyId: string | null) => LlmLogCtx,
+  v: VacancyRow,
+  channel: LetterChannel,
+): Promise<{ letter: string; generated: boolean }> {
+  if (v.letter) return { letter: v.letter, generated: false };
+  const { db, cfg } = deps;
+  const research = await researchCompany(
+    ctx(v.id),
+    deps.pplx,
+    cfg,
+    v.employer_id ?? v.employer_name,
+    v.employer_name,
+  );
+  const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
+  const letter = await writeLetter(
+    ctx(v.id),
+    deps.claude,
+    cfg,
+    {
+      resume: deps.resume,
+      vacancyText: text,
+      research,
+      score: JSON.parse(v.score_reasons ?? "{}") as ScoreResult,
+    },
+    channel,
+  );
+  repo.setStatus(db, v.id, "queued", { letter });
+  return { letter, generated: true };
+}
 
 // Транзиентный сбой (API-хиккап: Perplexity/Anthropic 403/408/429/5xx, timeout, сеть)
 // стоит повторить в СЛЕДУЮЩЕЙ сессии, а не помечать вакансию failed навсегда. Контентные
@@ -253,27 +290,8 @@ export async function runSession(
         break;
       }
       try {
-        // Письмо генерируем только один раз: если оно уже есть (прошлая dry-run сессия),
-        // не переписываем — иначе жжём LLM-бюджет и затираем уже проверенный пользователем текст.
-        let letter = v.letter;
-        if (!letter) {
-          const research = await researchCompany(
-            ctx(v.id),
-            deps.pplx,
-            cfg,
-            v.employer_id ?? v.employer_name,
-            v.employer_name,
-          );
-          const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
-          letter = await writeLetter(ctx(v.id), deps.claude, cfg, {
-            resume: deps.resume,
-            vacancyText: text,
-            research,
-            score: JSON.parse(v.score_reasons ?? "{}") as ScoreResult,
-          });
-          repo.setStatus(db, v.id, "queued", { letter });
-          llmErrors = 0; // успешная генерация письма сбрасывает счётчик подряд-ошибок
-        }
+        const { letter, generated } = await ensureLetter(deps, ctx, v, "platform");
+        if (generated) llmErrors = 0; // успешная генерация письма сбрасывает счётчик подряд-ошибок
         // dry-run: письмо сохранено, браузер не трогаем (повторная навигация по одним
         // и тем же вакансиям каждую сессию — заметный анти-бот паттерн, а проверка не нужна).
         if (mode === "dry_run") continue;
@@ -320,30 +338,7 @@ export async function runSession(
         continue;
       }
       try {
-        let letter = v.letter;
-        if (!letter) {
-          const research = await researchCompany(
-            ctx(v.id),
-            deps.pplx,
-            cfg,
-            v.employer_id ?? v.employer_name,
-            v.employer_name,
-          );
-          const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text ?? v.title;
-          letter = await writeLetter(
-            ctx(v.id),
-            deps.claude,
-            cfg,
-            {
-              resume: deps.resume,
-              vacancyText: text,
-              research,
-              score: JSON.parse(v.score_reasons ?? "{}") as ScoreResult,
-            },
-            "email",
-          );
-          repo.setStatus(db, v.id, "queued", { letter });
-        }
+        const { letter } = await ensureLetter(deps, ctx, v, "email");
         repo.insertEmailDraft(db, {
           vacancy_id: v.id,
           to_email: contact.email,

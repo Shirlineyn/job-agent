@@ -146,26 +146,39 @@ export class HhBrowser {
     await btn.click();
     await sleep(2000, 3500); // дать отклику уйти и странице перерисоваться
 
-    // После клика по «Откликнуться» hh ведёт себя двояко:
-    //  • attach — вакансия БЕЗ анкеты: клик УЖЕ отправил отклик («Резюме доставлено»),
-    //             письмо прикладывается после через «Приложить сопроводительное письмо».
-    //  • form   — форма отклика с анкетой и/или полем письма; submit отдельный (не отправлено).
-    // Отправку ловим по НЕСКОЛЬКИМ признакам сразу — одиночный data-qa оказался timing-флэки
-    // (отправленный отклик уходил в no_button → failed). Порядок: сначала форма (её надо
-    // засабмитить самим), затем признаки отправки, в т.ч. исчезновение самой кнопки отклика.
-    const isDelivered = async (): Promise<boolean> => {
-      if ((await this.page.locator(SEL.attachLetter).count()) > 0) return true;
-      if ((await this.page.locator(SEL.deliveredChat).count()) > 0) return true;
-      const t = await this.page
-        .locator("body")
-        .innerText()
-        .catch(() => "");
-      return /Резюме доставлено|Резюме отправлено|Вы откликнулись|Отклик доставлен|Отклик отправлен|Ваш отклик|Вы уже откликались/i.test(
-        t,
-      );
-    };
+    const scenario = await this.detectApplyScenario();
+    if (scenario === "attach") return this.applyAttachFlow(letter);
+    if (scenario === "form") return this.applyFormFlow(letter, answerFn);
 
-    let scenario: "attach" | "form" | "unknown" = "unknown";
+    // Не распознали сценарий. Если есть признаки отправки или кнопка отклика исчезла — считаем
+    // applied (для аккаунта с одним резюме клик почти всегда = отправка; лучше не недосчитать лимит).
+    if (await this.isResponseDelivered()) return "applied";
+    if ((await this.page.locator(SEL.respond).count()) === 0) return "applied";
+    return "no_button";
+  }
+
+  // Отправку ловим по НЕСКОЛЬКИМ признакам сразу — одиночный data-qa оказался timing-флэки
+  // (отправленный отклик уходил в no_button → failed): кнопка «приложить письмо», ссылка на
+  // чат, либо текст об успешной доставке в теле страницы.
+  private async isResponseDelivered(): Promise<boolean> {
+    if ((await this.page.locator(SEL.attachLetter).count()) > 0) return true;
+    if ((await this.page.locator(SEL.deliveredChat).count()) > 0) return true;
+    const t = await this.page
+      .locator("body")
+      .innerText()
+      .catch(() => "");
+    return /Резюме доставлено|Резюме отправлено|Вы откликнулись|Отклик доставлен|Отклик отправлен|Ваш отклик|Вы уже откликались/i.test(
+      t,
+    );
+  }
+
+  // После клика по «Откликнуться» hh ведёт себя двояко:
+  //  • attach — вакансия БЕЗ анкеты: клик УЖЕ отправил отклик («Резюме доставлено»),
+  //             письмо прикладывается после через «Приложить сопроводительное письмо».
+  //  • form   — форма отклика с анкетой и/или полем письма; submit отдельный (не отправлено).
+  // Порядок: сначала форма (её надо засабмитить самим), затем признаки отправки, в т.ч.
+  // исчезновение самой кнопки отклика.
+  private async detectApplyScenario(): Promise<"attach" | "form" | "unknown"> {
     for (let i = 0; i < 20; i++) {
       await this.guard();
       const relocate = this.page.locator('[data-qa="relocation-warning-confirm"]');
@@ -180,91 +193,81 @@ export class HhBrowser {
         (await this.page.locator(SEL.letterInput).count()) > 0 ||
         (await this.page.locator(SEL.submit).count()) > 0
       ) {
-        scenario = "form";
-        break;
+        return "form";
       }
-      if (await isDelivered()) {
-        scenario = "attach";
-        break;
-      }
+      if (await this.isResponseDelivered()) return "attach";
       // крайний признак: кнопка отклика исчезла, а формы нет — клик отправил отклик. Не раньше
       // нескольких итераций, чтобы не спутать с ещё не отрисованной формой.
-      if (i >= 4 && (await this.page.locator(SEL.respond).count()) === 0) {
-        scenario = "attach";
-        break;
-      }
+      if (i >= 4 && (await this.page.locator(SEL.respond).count()) === 0) return "attach";
       await sleep(700, 1200);
     }
+    return "unknown";
+  }
 
-    if (scenario === "attach") {
-      // Отклик уже отправлен самим кликом — прикладываем письмо best-effort (если hh дал кнопку).
-      // Отклик засчитан в любом случае → "applied", иначе пайплайн пометит failed и собьёт лимит.
-      // Исключение: если отклик по вакансии УЖЕ был и просмотрен работодателем — письмо приложить
-      // нельзя, и это не свежий отклик от нас → валим вакансию в no_button (по решению пользователя).
-      const alreadySeen = async () =>
-        /уже просмотрен работодателем/i.test(
-          await this.page
-            .locator("body")
-            .innerText()
-            .catch(() => ""),
-        );
-      try {
-        const attach = this.page.locator(SEL.attachLetter);
-        if ((await attach.count()) > 0) {
-          await attach.click();
-          await sleep(800, 1500);
-          if (await alreadySeen()) return "no_button";
-          const dialog = this.page.getByRole("dialog"); // textarea письма ищем в попапе
-          const box = ((await dialog.count()) > 0 ? dialog : this.page).locator("textarea").first();
-          await box.waitFor({ state: "visible", timeout: 8000 });
-          await box.fill(letter); // fill(), не посимвольно: длинное письмо иначе висит
-          await sleep(400, 900);
-          await this.page.locator(SEL.letterPopupSubmit).click();
-          await sleep(1500, 3000);
-          if (await alreadySeen()) return "no_button"; // запрет всплыл при отправке письма
-          await this.guard();
-        }
-      } catch {
-        /* отклик уже ушёл; приложение письма — best-effort, не роняем "applied" */
-      }
-      return "applied";
-    }
-
-    if (scenario === "form") {
-      // Анкета работодателя, если есть: извлекаем вопросы, отвечаем через колбэк (LLM в пайплайне), заполняем.
-      if (answerFn && (await this.hasQuestionnaire())) {
-        const questions = await this.extractQuestionnaire();
-        const answers = await answerFn(questions);
-        await this.fillQuestionnaire(answers, questions);
+  // Вакансия БЕЗ анкеты: отклик уже отправлен самим кликом — прикладываем письмо best-effort
+  // (если hh дал кнопку). Отклик засчитан в любом случае → "applied", иначе пайплайн пометит
+  // failed и собьёт лимит. Исключение: если отклик по вакансии УЖЕ был и просмотрен
+  // работодателем — письмо приложить нельзя, и это не свежий отклик от нас → no_button.
+  private async applyAttachFlow(letter: string): Promise<"applied" | "no_button"> {
+    const alreadySeen = async () =>
+      /уже просмотрен работодателем/i.test(
+        await this.page
+          .locator("body")
+          .innerText()
+          .catch(() => ""),
+      );
+    try {
+      const attach = this.page.locator(SEL.attachLetter);
+      if ((await attach.count()) > 0) {
+        await attach.click();
         await sleep(800, 1500);
+        if (await alreadySeen()) return "no_button";
+        const dialog = this.page.getByRole("dialog"); // textarea письма ищем в попапе
+        const box = ((await dialog.count()) > 0 ? dialog : this.page).locator("textarea").first();
+        await box.waitFor({ state: "visible", timeout: 8000 });
+        await box.fill(letter); // fill(), не посимвольно: длинное письмо иначе висит
+        await sleep(400, 900);
+        await this.page.locator(SEL.letterPopupSubmit).click();
+        await sleep(1500, 3000);
+        if (await alreadySeen()) return "no_button"; // запрет всплыл при отправке письма
+        await this.guard();
       }
-      const toggle = this.page.locator(SEL.letterToggle);
-      if ((await toggle.count()) > 0) {
-        await toggle.click();
-        await sleep(500, 1500);
-      }
-      const input = this.page.locator(SEL.letterInput);
-      // Живой отклик без поля письма — не отправляем «пустой» отклик (fail-closed).
-      if ((await input.count()) === 0) return "no_button";
-      await input.fill(letter);
-      await sleep(400, 900);
-      await this.page.locator(SEL.submit).click();
-      await sleep(1500, 3000);
-      await this.guard();
-      // hh создаёт отклик только при ПОЛНОСТЬЮ заполненной анкете; при пустом обязательном поле
-      // submit молча не срабатывает и форма остаётся. Убеждаемся, что отклик реально доставлен,
-      // иначе — no_button (а не ложный applied, как было с пустым зарплатным полем Почты).
-      for (let i = 0; i < 6; i++) {
-        if (await isDelivered()) return "applied";
-        await sleep(700, 1200);
-      }
-      return "no_button";
+    } catch {
+      /* отклик уже ушёл; приложение письма — best-effort, не роняем "applied" */
     }
+    return "applied";
+  }
 
-    // Не распознали сценарий. Если есть признаки отправки или кнопка отклика исчезла — считаем
-    // applied (для аккаунта с одним резюме клик почти всегда = отправка; лучше не недосчитать лимит).
-    if (await isDelivered()) return "applied";
-    if ((await this.page.locator(SEL.respond).count()) === 0) return "applied";
+  // Форма отклика: анкета работодателя (если есть) → поле письма → submit. hh создаёт отклик
+  // только при ПОЛНОСТЬЮ заполненной анкете; при пустом обязательном поле submit молча не
+  // срабатывает — поэтому подтверждаем доставку, иначе no_button (а не ложный applied).
+  private async applyFormFlow(
+    letter: string,
+    answerFn?: (questions: QuestionnaireItem[]) => Promise<QuestionnaireAnswer[]>,
+  ): Promise<"applied" | "no_button"> {
+    if (answerFn && (await this.hasQuestionnaire())) {
+      const questions = await this.extractQuestionnaire();
+      const answers = await answerFn(questions);
+      await this.fillQuestionnaire(answers, questions);
+      await sleep(800, 1500);
+    }
+    const toggle = this.page.locator(SEL.letterToggle);
+    if ((await toggle.count()) > 0) {
+      await toggle.click();
+      await sleep(500, 1500);
+    }
+    const input = this.page.locator(SEL.letterInput);
+    // Живой отклик без поля письма — не отправляем «пустой» отклик (fail-closed).
+    if ((await input.count()) === 0) return "no_button";
+    await input.fill(letter);
+    await sleep(400, 900);
+    await this.page.locator(SEL.submit).click();
+    await sleep(1500, 3000);
+    await this.guard();
+    for (let i = 0; i < 6; i++) {
+      if (await this.isResponseDelivered()) return "applied";
+      await sleep(700, 1200);
+    }
     return "no_button";
   }
 
