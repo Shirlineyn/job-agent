@@ -11,7 +11,10 @@ import { notify } from "./notify.js";
 import { startScheduler } from "./scheduler.js";
 import { startMcp } from "./mcp/server.js";
 import { buildSources } from "./sources/index.js";
+import { logger } from "./logger.js";
 import type { Deps } from "./pipeline/run.js";
+
+const log = logger("hh-agent");
 
 const DIR = join(homedir(), ".hh-agent");
 const cfg = loadConfig();
@@ -38,4 +41,4 @@ async function mkDeps(): Promise<Deps> {
 
 startMcp(db, mkDeps, cfg.port);
 startScheduler(mkDeps, cfg);
-console.log(`[hh-agent] mode=${cfg.mode} limit=${cfg.dailyLimit}/day`);
+log.info(`mode=${cfg.mode} limit=${cfg.dailyLimit}/day`);

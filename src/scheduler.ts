@@ -3,7 +3,10 @@ import { jitter } from "./browser/humanize.js";
 import { runSession, type Deps } from "./pipeline/run.js";
 import { loadConfig, type Config } from "./config.js";
 import { notify } from "./notify.js";
+import { logger } from "./logger.js";
 import { tryAcquireRunLock, releaseRunLock } from "./run-lock.js";
+
+const log = logger("scheduler");
 
 export function startScheduler(mkDeps: () => Promise<Deps>, cfg: Config): void {
   for (const expr of cfg.schedule) {
@@ -11,11 +14,11 @@ export function startScheduler(mkDeps: () => Promise<Deps>, cfg: Config): void {
       expr,
       async () => {
         if (loadConfig().paused) {
-          console.log("[scheduler] paused, skip");
+          log.info("paused, skip");
           return;
         }
         if (!tryAcquireRunLock()) {
-          console.log("[scheduler] session already running, skip");
+          log.info("session already running, skip");
           return;
         }
         try {
@@ -24,7 +27,7 @@ export function startScheduler(mkDeps: () => Promise<Deps>, cfg: Config): void {
           // переключить live→dry_run в течение окна ожидания — учитываем это, а не снимок «до».
           const fresh = loadConfig();
           if (fresh.paused) {
-            console.log("[scheduler] paused during jitter, skip");
+            log.info("paused during jitter, skip");
             return;
           }
           const deps = await mkDeps();
@@ -41,5 +44,5 @@ export function startScheduler(mkDeps: () => Promise<Deps>, cfg: Config): void {
       { timezone: "Europe/Moscow" },
     );
   }
-  console.log(`[scheduler] armed: ${cfg.schedule.join(" | ")}`);
+  log.info(`armed: ${cfg.schedule.join(" | ")}`);
 }

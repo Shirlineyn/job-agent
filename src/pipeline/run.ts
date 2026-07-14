@@ -9,6 +9,7 @@ import { answerQuestionnaire } from "../llm/questionnaire.js";
 import { findCompanyEmail } from "../llm/emailSearch.js";
 import { CaptchaDetected, LoggedOut, type HhBrowser } from "../browser/hh.js";
 import { sleep } from "../browser/humanize.js";
+import { logger } from "../logger.js";
 import type { Config } from "../config.js";
 import type { callClaude } from "../llm/anthropic.js";
 import type { callPerplexity } from "../llm/perplexity.js";
@@ -58,6 +59,7 @@ export async function runSession(
   const { db, cfg } = deps;
   const mode = modeOverride ?? cfg.mode;
   const runId = repo.startRun(db, trigger, mode);
+  const log = logger(`run ${runId}`);
   const s: RunSummary = {
     runId,
     discovered: 0,
@@ -89,8 +91,8 @@ export async function runSession(
         return "stop";
       }
       s.errors++;
-      console.error(
-        `[run ${runId}] browser error #${browserErrorStreak + 1}: ${String(e).replace(/\s+/g, " ").slice(0, 220)}`,
+      log.error(
+        `browser error #${browserErrorStreak + 1}: ${String(e).replace(/\s+/g, " ").slice(0, 220)}`,
       );
       await sleep(2000, 5000); // бэкофф: дать сети/hh восстановиться после краткого блипа
       // порог 5 (не 3): прогон фетчит десятки страниц, 3 подряд — часто просто моргание сети,
@@ -130,7 +132,7 @@ export async function runSession(
       for (const c of cards) if (repo.upsertVacancy(db, c)) s.discovered++;
     } catch (e) {
       s.errors++;
-      console.error(`[run ${runId}] source ${src.name} failed: ${String(e).slice(0, 200)}`);
+      log.error(`source ${src.name} failed: ${String(e).slice(0, 200)}`);
     }
   }
 

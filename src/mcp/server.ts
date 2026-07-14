@@ -12,6 +12,9 @@ import { notify } from "../notify.js";
 import { makeMailer } from "../email/send.js";
 import { approveEmail } from "../email/approve.js";
 import { appendToGmailDrafts } from "../email/gmailDraft.js";
+import { logger } from "../logger.js";
+
+const log = logger("mcp");
 
 const j = (data: unknown) => ({
   content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
@@ -249,6 +252,6 @@ export function startMcp(db: Database, mkDeps: () => Promise<Deps>, port: number
     await transport.handleRequest(req, res, req.body);
   });
   app.listen(port, "127.0.0.1", () => {
-    console.log(`[mcp] http://localhost:${port}/mcp`);
+    log.info(`http://localhost:${port}/mcp`);
   });
 }
