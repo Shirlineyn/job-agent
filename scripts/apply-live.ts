@@ -20,6 +20,7 @@ import { callPerplexity } from "../src/llm/perplexity.js";
 import { researchCompany } from "../src/llm/research.js";
 import { writeLetter } from "../src/llm/letter.js";
 import { answerQuestionnaire } from "../src/llm/questionnaire.js";
+import { tryAcquireRunLock, releaseRunLock } from "../src/run-lock.js";
 
 const cmd = process.argv[2];
 const ids = process.argv.slice(3);
@@ -116,6 +117,12 @@ async function main() {
   console.log(
     `⚠ LIVE — реальные отклики. Вакансий: ${ids.length}. dailyLimit=${cfg.dailyLimit}, уже сегодня=${repo.appliedToday(db)}.`,
   );
+  // Межпроцессный lock: если демон (или другой apply-live) уже гоняет сессию, не запускаемся —
+  // иначе два процесса дерутся за браузерный профиль ~/.hh-agent/profile.
+  if (!tryAcquireRunLock()) {
+    console.log("другой прогон уже идёт (демон/apply-live) — стоп, чтобы не биться за профиль.");
+    process.exit(1);
+  }
   const runId = repo.startRun(db, "manual", "live");
   const browser = new HhBrowser();
   await browser.launch(join(homedir(), ".hh-agent", "profile"));
@@ -185,6 +192,7 @@ async function main() {
   repo.finishRun(db, runId, { applied, stop_reason: stop });
   console.log(`\nИтог: отправлено ${applied} из ${ids.length}. stop=${stop}`);
   await browser.close();
+  releaseRunLock();
 }
 
 main().catch((e) => {
