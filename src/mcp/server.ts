@@ -12,6 +12,7 @@ import { notify } from "../notify.js";
 import { makeMailer } from "../email/send.js";
 import { approveEmail } from "../email/approve.js";
 import { appendToGmailDrafts } from "../email/gmailDraft.js";
+import { reconcileSentDrafts } from "../email/reconcile.js";
 import { logger } from "../logger.js";
 
 const log = logger("mcp");
@@ -144,23 +145,32 @@ function buildServer(db: Database, mkDeps: () => Promise<Deps>): McpServer {
   mcp.registerTool(
     "get_email_queue",
     { description: "Черновики писем HR, ждущие подтверждения", inputSchema: {} },
-    async () =>
-      j(
-        repo.getEmailsByStatus(db, "draft").map((e) => {
-          const v = repo.getVacancy(db, e.vacancy_id);
-          return {
-            id: e.id,
-            vacancy_id: e.vacancy_id,
-            title: v?.title,
-            employer: v?.employer_name,
-            score: v?.score,
-            url: v?.url,
-            to: e.to_email,
-            subject: e.subject,
-            body: e.body,
-          };
-        }),
-      ),
+    async () => {
+      // best-effort сверка с «Отправленными» Gmail: очередь не должна показывать
+      // уже отправленное вручную. Ошибка IMAP не должна ронять просмотр очереди.
+      let reconcileFailed = false;
+      try {
+        await reconcileSentDrafts(db, loadConfig());
+      } catch (err) {
+        reconcileFailed = true;
+        log.warn(`сверка с Gmail не удалась: ${String(err)}`);
+      }
+      const queue = repo.getEmailsByStatus(db, "draft").map((e) => {
+        const v = repo.getVacancy(db, e.vacancy_id);
+        return {
+          id: e.id,
+          vacancy_id: e.vacancy_id,
+          title: v?.title,
+          employer: v?.employer_name,
+          score: v?.score,
+          url: v?.url,
+          to: e.to_email,
+          subject: e.subject,
+          body: e.body,
+        };
+      });
+      return j({ reconcile_failed: reconcileFailed, queue });
+    },
   );
   mcp.registerTool(
     "update_email",
