@@ -1,5 +1,5 @@
 // tests/mcp-emails.test.ts
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { openDb } from "../src/state/db.js";
 import * as repo from "../src/state/repo.js";
 import { approveEmail } from "../src/email/approve.js";
@@ -26,6 +26,10 @@ const vac = (id: string): VacancyInsert => ({
 });
 
 describe("approveEmail", () => {
+  // Без SMTP_PASSWORD дефолтная сверка (reconcileSentDrafts) — no-op, не ходит в IMAP.
+  beforeEach(() => {
+    delete process.env.SMTP_PASSWORD;
+  });
   it("шлёт, помечает sent и переводит вакансию в applied", async () => {
     const db = openDb(":memory:");
     repo.upsertVacancy(db, vac("hirehi:1"));
@@ -77,5 +81,41 @@ describe("approveEmail", () => {
     const r = await approveEmail(db, cfg, mailer, repo.getEmailByVacancy(db, "hirehi:1")!.id);
     expect(r).toMatchObject({ error: expect.stringContaining("535") });
     expect(repo.getEmailByVacancy(db, "hirehi:1")!.status).toBe("draft");
+  });
+  it("не шлёт дубль: сверка пометила письмо sent → отказ", async () => {
+    const db = openDb(":memory:");
+    repo.upsertVacancy(db, vac("hirehi:1"));
+    repo.insertEmailDraft(db, {
+      vacancy_id: "hirehi:1",
+      to_email: "hr@a.ru",
+      subject: "S",
+      body: "B",
+    });
+    const e = repo.getEmailByVacancy(db, "hirehi:1")!;
+    const mailer = { send: vi.fn().mockResolvedValue(undefined) };
+    // сверка «обнаружила», что письмо уже ушло вручную из Gmail
+    const reconcile = (d: typeof db) => {
+      repo.markEmailSent(d, e.id);
+      return Promise.resolve();
+    };
+    const r = await approveEmail(db, cfg, mailer, e.id, reconcile);
+    expect("error" in r).toBe(true);
+    expect(mailer.send).not.toHaveBeenCalled();
+  });
+  it("сверка упала → fail-closed, письмо не уходит", async () => {
+    const db = openDb(":memory:");
+    repo.upsertVacancy(db, vac("hirehi:1"));
+    repo.insertEmailDraft(db, {
+      vacancy_id: "hirehi:1",
+      to_email: "hr@a.ru",
+      subject: "S",
+      body: "B",
+    });
+    const mailer = { send: vi.fn().mockResolvedValue(undefined) };
+    const r = await approveEmail(db, cfg, mailer, repo.getEmailByVacancy(db, "hirehi:1")!.id, () =>
+      Promise.reject(new Error("imap down")),
+    );
+    expect(r).toMatchObject({ error: expect.stringContaining("сверка") });
+    expect(mailer.send).not.toHaveBeenCalled();
   });
 });
