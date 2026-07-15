@@ -241,8 +241,10 @@ export function updateEmailDraft(
     WHERE id=@id AND status='draft'`,
   ).run({ subject: null, body: null, ...patch, id });
 }
-export function markEmailSent(db: Database, id: number): void {
-  db.prepare(`UPDATE emails SET status='sent', sent_at=datetime('now') WHERE id=?`).run(id);
+export function markEmailSent(db: Database, id: number, sentAt?: string): void {
+  db.prepare(
+    `UPDATE emails SET status='sent', sent_at=COALESCE(?, datetime('now')) WHERE id=?`,
+  ).run(sentAt ?? null, id);
 }
 export function markEmailRejected(db: Database, id: number): void {
   db.prepare(`UPDATE emails SET status='rejected' WHERE id=?`).run(id);

@@ -66,6 +66,19 @@ describe("черновики писем", () => {
     expect(repo.getEmailsByStatus(db, "sent")).toHaveLength(1);
     expect(repo.emailsSentToday(db)).toBe(1);
   });
+  it("markEmailSent проставляет переданный sent_at", () => {
+    const db = openDb(":memory:");
+    repo.upsertVacancy(db, vac("hirehi:9"));
+    repo.insertEmailDraft(db, {
+      vacancy_id: "hirehi:9",
+      to_email: "hr@a.ru",
+      subject: "S",
+      body: "B",
+    });
+    const e = repo.getEmailByVacancy(db, "hirehi:9")!;
+    repo.markEmailSent(db, e.id, "2026-07-14 09:00:00");
+    expect(repo.getEmailById(db, e.id)!.sent_at).toBe("2026-07-14 09:00:00");
+  });
 });
 
 describe("llm_calls после пересоздания", () => {
