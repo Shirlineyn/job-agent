@@ -1,10 +1,29 @@
 import { describe, it, expect } from "vitest";
 import { applyHardFilters } from "../src/filters.js";
+import type { Config } from "../src/config.js";
 
-const f = { salaryMin: 200000, allowUnknownSalary: true, workFormats: ["remote", "hybrid", "office"], freshDays: 7, maxExperience: ["noExperience", "between1And3", "between3And6"] } as const;
-const base = { id: "1", url: "u", title: "t", employer_id: "e", employer_name: "Acme",
-  salary_from: null, salary_to: null, currency: null, work_format: "remote" as const,
-  experience: "between1And3", published_at: new Date().toISOString(), raw_json: "{}", source: "hh" };
+const f: Config["filters"] = {
+  salaryMin: 200000,
+  allowUnknownSalary: true,
+  workFormats: ["remote", "hybrid", "office"],
+  freshDays: 7,
+  maxExperience: ["noExperience", "between1And3", "between3And6"],
+};
+const base = {
+  id: "1",
+  url: "u",
+  title: "t",
+  employer_id: "e",
+  employer_name: "Acme",
+  salary_from: null,
+  salary_to: null,
+  currency: null,
+  work_format: "remote" as const,
+  experience: "between1And3",
+  published_at: new Date().toISOString(),
+  raw_json: "{}",
+  source: "hh",
+};
 
 describe("hard filters", () => {
   it("passes unknown salary when allowed", () => {
@@ -27,11 +46,19 @@ describe("hard filters", () => {
     expect(r).toEqual({ pass: false, reason: "experience_mismatch" });
   });
   it("treats null work_format as unknown and rejects it when unknown is not allowed", () => {
-    const r = applyHardFilters({ ...base, work_format: null }, { ...f, workFormats: ["remote"] }, []);
+    const r = applyHardFilters(
+      { ...base, work_format: null },
+      { ...f, workFormats: ["remote"] },
+      [],
+    );
     expect(r).toEqual({ pass: false, reason: "work_format" });
   });
   it("passes null work_format when unknown is allowed", () => {
-    const r = applyHardFilters({ ...base, work_format: null }, { ...f, workFormats: ["remote", "unknown"] }, []);
+    const r = applyHardFilters(
+      { ...base, work_format: null },
+      { ...f, workFormats: ["remote", "unknown"] },
+      [],
+    );
     expect(r.pass).toBe(true);
   });
 });

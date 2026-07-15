@@ -4,7 +4,7 @@
   <key>Label</key><string>com.aleksandr.hh-agent-restart</string>
   <key>ProgramArguments</key><array>
     <string>/bin/zsh</string>
-    <string>/Users/adoronin001/Shirlineyn_Folder/Personal_Projects/hh-agent/launchd/restart-agent.sh</string>
+    <string>/ABSOLUTE/PATH/TO/hh-agent/launchd/restart-agent.sh</string>
   </array>
   <key>StartCalendarInterval</key><array>
     <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>55</integer></dict>

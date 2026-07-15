@@ -13,7 +13,7 @@ import { applyHardFilters } from "../src/filters.js";
 import { scoreVacancy } from "../src/llm/scoring.js";
 import { callClaude } from "../src/llm/anthropic.js";
 
-const CAP = Number(process.argv[2]) || 12;   // сколько новых вакансий максимум оценить
+const CAP = Number(process.argv[2]) || 12; // сколько новых вакансий максимум оценить
 
 async function main() {
   const cfg = loadConfig();
@@ -22,7 +22,9 @@ async function main() {
   const runId = repo.startRun(db, "manual", "dry_run");
   const browser = new HhBrowser();
   await browser.launch(join(homedir(), ".hh-agent", "profile"));
-  let discovered = 0, scored = 0, queued = 0;
+  let discovered = 0,
+    scored = 0,
+    queued = 0;
   try {
     for (const q of cfg.searchQueries) {
       const found = await browser.searchVacancies(q, cfg.area);
@@ -31,21 +33,50 @@ async function main() {
     // hh-рекомендации: пустой запрос + дефолтный (релевантный) порядок hh под резюме.
     const rec = await browser.searchVacancies("", cfg.area, "default");
     let recNew = 0;
-    for (const card of rec) if (repo.upsertVacancy(db, card)) { discovered++; recNew++; }
-    console.log(`discovered новых: ${discovered} (из них hh-рекомендаций: ${recNew} из ${rec.length} карточек)`);
+    for (const card of rec)
+      if (repo.upsertVacancy(db, card)) {
+        discovered++;
+        recNew++;
+      }
+    console.log(
+      `discovered новых: ${discovered} (из них hh-рекомендаций: ${recNew} из ${rec.length} карточек)`,
+    );
     const blacklist = repo.getBlacklist(db);
     for (const v of repo.getByStatus(db, "discovered")) {
-      if (scored >= CAP) { console.log(`достигнут потолок скоринга (${CAP}) — остальные оставлены discovered`); break; }
+      if (scored >= CAP) {
+        console.log(`достигнут потолок скоринга (${CAP}) — остальные оставлены discovered`);
+        break;
+      }
       const verdict = applyHardFilters(v, cfg.filters, blacklist);
-      if (!verdict.pass) { repo.setStatus(db, v.id, "filtered_out", { filter_reason: verdict.reason }); continue; }
+      if (!verdict.pass) {
+        repo.setStatus(db, v.id, "filtered_out", { filter_reason: verdict.reason });
+        continue;
+      }
       const text = await browser.fetchVacancyText(v.url);
       try {
-        const score = await scoreVacancy({ db, runId, vacancyId: v.id }, callClaude, cfg, resume, text);
+        const score = await scoreVacancy(
+          { db, runId, vacancyId: v.id },
+          callClaude,
+          cfg,
+          resume,
+          text,
+        );
         scored++;
         const st = score.score >= cfg.scoreThreshold ? "queued" : "skipped";
-        if (st === "queued") { queued++; console.log(`  [${score.score}] queued: ${(v.employer_name||"").slice(0,20)} — ${(v.title||"").slice(0,40)}  id=${v.id}`); }
-        repo.setStatus(db, v.id, st, { score: score.score, score_reasons: JSON.stringify(score), raw_json: JSON.stringify({ text }) });
-      } catch (e) { console.log(`  score fail ${v.id}: ${String(e).slice(0, 50)}`); }
+        if (st === "queued") {
+          queued++;
+          console.log(
+            `  [${score.score}] queued: ${(v.employer_name || "").slice(0, 20)} — ${(v.title || "").slice(0, 40)}  id=${v.id}`,
+          );
+        }
+        repo.setStatus(db, v.id, st, {
+          score: score.score,
+          score_reasons: JSON.stringify(score),
+          raw_json: JSON.stringify({ text }),
+        });
+      } catch (e) {
+        console.log(`  score fail ${v.id}: ${String(e).slice(0, 50)}`);
+      }
     }
     console.log(`\nОценено: ${scored}, в очередь: ${queued}.`);
   } catch (e) {
@@ -57,4 +88,7 @@ async function main() {
     await browser.close();
   }
 }
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

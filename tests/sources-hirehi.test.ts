@@ -10,27 +10,38 @@ import type { Config } from "../src/config.js";
 //   category не валидируется бэкендом при рендере, так что placeholder безопасен).
 const SEARCH_FIXTURE = {
   total_count: 1,
-  jobs: [{
-    id: 123, title: "ML Engineer", company: "Acme", category: "development",
-    salary_display: "от 250 000 до 400 000 ₽", format: "удалённо",
-    level: "middle", created_at: "2026-07-10T09:00:00Z",
-  }],
+  jobs: [
+    {
+      id: 123,
+      title: "ML Engineer",
+      company: "Acme",
+      category: "development",
+      salary_display: "от 250 000 до 400 000 ₽",
+      format: "удалённо",
+      level: "middle",
+      created_at: "2026-07-10T09:00:00Z",
+    },
+  ],
 };
 const JOB_FIXTURE = {
-  id: 123, description: "<p>Ищем ML-инженера</p>", requirements: "Python, LLM",
-  tasks_details: "RAG-пайплайны", conditions_details: "удалёнка",
+  id: 123,
+  description: "<p>Ищем ML-инженера</p>",
+  requirements: "Python, LLM",
+  tasks_details: "RAG-пайплайны",
+  conditions_details: "удалёнка",
 };
 const jsonRes = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
 describe("hirehiSource", () => {
   it("search маппит карточки: namespaced id, зарплата из salary_display, формат", async () => {
-    const f = vi.fn()
-      .mockResolvedValueOnce(jsonRes(SEARCH_FIXTURE))   // page 1
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(jsonRes(SEARCH_FIXTURE)) // page 1
       .mockResolvedValue(jsonRes({ total_count: 1, jobs: [] }));
     const src = hirehiSource(f as never);
     const cards = await src.search(["python"], {} as Config);
     expect(cards).toHaveLength(1);
-    const c = cards[0];
+    const c = cards[0]!;
     expect(c.id).toBe("hirehi:123");
     expect(c.source).toBe("hirehi");
     expect(c.employer_name).toBe("Acme");
@@ -65,25 +76,29 @@ describe("hirehiSource", () => {
         { id: 2, title: "Broken Job", company: null, category: "dev", salary_display: null },
       ],
     };
-    const f = vi.fn()
+    const f = vi
+      .fn()
       .mockResolvedValueOnce(jsonRes(fixture))
       .mockResolvedValue(jsonRes({ total_count: 0, jobs: [] }));
     const src = hirehiSource(f as never);
     const cards = await src.search(["python"], {} as Config);
     expect(cards).toHaveLength(1);
-    expect(cards[0].id).toBe("hirehi:1");
+    expect(cards[0]!.id).toBe("hirehi:1");
   });
   it("одиночную приблизительную зарплату (~N) трактует как from=to", async () => {
     const fixture = {
       total_count: 1,
-      jobs: [{ id: 999, title: "QA", company: "Beta", category: "qa", salary_display: "~ 300 000 ₽" }],
+      jobs: [
+        { id: 999, title: "QA", company: "Beta", category: "qa", salary_display: "~ 300 000 ₽" },
+      ],
     };
-    const f = vi.fn()
+    const f = vi
+      .fn()
       .mockResolvedValueOnce(jsonRes(fixture))
       .mockResolvedValue(jsonRes({ total_count: 1, jobs: [] }));
     const src = hirehiSource(f as never);
     const cards = await src.search(["qa"], {} as Config);
-    expect(cards[0].salary_from).toBe(300000);
-    expect(cards[0].salary_to).toBe(300000);
+    expect(cards[0]!.salary_from).toBe(300000);
+    expect(cards[0]!.salary_to).toBe(300000);
   });
 });

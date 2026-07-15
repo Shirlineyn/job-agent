@@ -16,9 +16,11 @@ export function openDb(path: string): Database.Database {
 
 function migrate(db: Database.Database): void {
   const current = db.pragma("user_version", { simple: true }) as number;
-  const files = readdirSync(MIGRATIONS).filter(f => f.endsWith(".sql")).sort();
+  const files = readdirSync(MIGRATIONS)
+    .filter((f) => f.endsWith(".sql"))
+    .sort();
   for (const f of files) {
-    const n = Number(f.match(/^V(\d+)__/)?.[1]);
+    const n = Number(/^V(\d+)__/.exec(f)?.[1]);
     if (!n || n <= current) continue;
     db.transaction(() => {
       db.exec(readFileSync(join(MIGRATIONS, f), "utf8"));

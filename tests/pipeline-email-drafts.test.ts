@@ -8,28 +8,53 @@ import type { VacancyInsert } from "../src/state/types.js";
 
 const queuedVac = (db: ReturnType<typeof openDb>, id: string): void => {
   const v: VacancyInsert = {
-    id, url: "https://x.test/" + id, title: "LLM Engineer", employer_id: "h:acme", employer_name: "Acme",
-    salary_from: null, salary_to: null, currency: null, work_format: "remote", experience: null,
-    published_at: null, raw_json: JSON.stringify({ text: "текст" }), source: "hirehi",
+    id,
+    url: "https://x.test/" + id,
+    title: "LLM Engineer",
+    employer_id: "h:acme",
+    employer_name: "Acme",
+    salary_from: null,
+    salary_to: null,
+    currency: null,
+    work_format: "remote",
+    experience: null,
+    published_at: null,
+    raw_json: JSON.stringify({ text: "текст" }),
+    source: "hirehi",
   };
   repo.upsertVacancy(db, v);
-  repo.setStatus(db, id, "queued", { score: 90, score_reasons: JSON.stringify({ score: 90, reasons: [], red_flags: [] }) });
+  repo.setStatus(db, id, "queued", {
+    score: 90,
+    score_reasons: JSON.stringify({ score: 90, reasons: [], red_flags: [] }),
+  });
 };
 
 function mkDeps(db: ReturnType<typeof openDb>): Deps {
   return {
-    db, cfg: ConfigSchema.parse({ mode: "dry_run", searchQueries: [], enabledSources: [] }),
-    browser: { searchVacancies: vi.fn().mockResolvedValue([]), fetchVacancyText: vi.fn(), apply: vi.fn(), waitCaptchaCleared: vi.fn() } as never,
+    db,
+    cfg: ConfigSchema.parse({ mode: "dry_run", searchQueries: [], enabledSources: [] }),
+    browser: {
+      searchVacancies: vi.fn().mockResolvedValue([]),
+      fetchVacancyText: vi.fn(),
+      apply: vi.fn(),
+      waitCaptchaCleared: vi.fn(),
+    },
     // Упрощённый мок из брифа ("Здравствуйте! Я Александр...") не проходит validateLetter
     // (src/llm/letter.ts: 100-220 слов, подпись "Доронин") — санкционированная замена мока,
     // не production-кода, по тому же образцу, что в tests/pipeline-email-gate.test.ts. В этом
     // тесте вакансия попадает в очередь напрямую (queuedVac), минуя стадию скоринга, поэтому
     // единственный вызов claude здесь — с purpose "letter"; дифференциация по purpose не нужна.
-    claude: vi.fn().mockResolvedValue(
-      "Здравствуйте! Я ИИ-агент, действующий по поручению Александра Доронина. " + "слово ".repeat(130) + "Доронин",
-    ) as never,
+    claude: vi
+      .fn()
+      .mockResolvedValue(
+        "Здравствуйте! Я ИИ-агент, действующий по поручению Александра Доронина. " +
+          "слово ".repeat(130) +
+          "Доронин",
+      ) as never,
     pplx: vi.fn().mockResolvedValue("справка о компании") as never,
-    notify: vi.fn(), resume: "резюме", sources: [] as never,
+    notify: vi.fn(),
+    resume: "резюме",
+    sources: [] as never,
   };
 }
 

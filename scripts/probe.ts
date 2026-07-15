@@ -24,24 +24,43 @@ const SEL = {
 // Duplicate of HhBrowser's card extraction, used only when isLoggedOut()
 // causes guard() to throw before searchVacancies() can return.
 async function extractCardsDirect(page: Page): Promise<VacancyInsert[]> {
-  return page.$$eval(SEL.card, (cards, sel) => cards.map(c => {
-    const a = c.querySelector<HTMLAnchorElement>(sel.title);
-    const href = a?.href ?? "";
-    const salaryText = c.querySelector(sel.compensation)?.textContent ?? "";
-    const nums = [...salaryText.matchAll(/[\d\s ]{4,}/g)].map(m => Number(m[0].replace(/\D/g, "")));
-    return {
-      id: href.match(/vacancy\/(\d+)/)?.[1] ?? "",
-      url: href.split("?")[0],
-      title: a?.textContent?.trim() ?? "",
-      employer_id: c.querySelector<HTMLAnchorElement>(sel.employer)?.href?.match(/employer\/(\d+)/)?.[1] ?? null,
-      employer_name: c.querySelector(sel.employer)?.textContent?.trim() ?? "",
-      salary_from: nums[0] ?? null, salary_to: nums[1] ?? nums[0] ?? null,
-      currency: salaryText.includes("₽") ? "RUR" : salaryText ? "OTHER" : null,
-      work_format: (/удал[её]нн/i.test(c.textContent ?? "") ? "remote" : /гибрид/i.test(c.textContent ?? "") ? "hybrid" : "unknown") as VacancyInsert["work_format"],
-      experience: null, published_at: null,
-      raw_json: JSON.stringify({ card: c.textContent?.slice(0, 2000) }),
-    };
-  }), SEL).then(list => list.filter(v => v.id));
+  return page
+    .$$eval(
+      SEL.card,
+      (cards, sel) =>
+        cards.map((c): VacancyInsert => {
+          const a = c.querySelector<HTMLAnchorElement>(sel.title);
+          const href = a?.href ?? "";
+          const salaryText = c.querySelector(sel.compensation)?.textContent ?? "";
+          const nums = [...salaryText.matchAll(/[\d\s ]{4,}/g)].map((m) =>
+            Number(m[0].replace(/\D/g, "")),
+          );
+          return {
+            id: /vacancy\/(\d+)/.exec(href)?.[1] ?? "",
+            url: href.split("?")[0] ?? "",
+            title: a?.textContent?.trim() ?? "",
+            employer_id:
+              c
+                .querySelector<HTMLAnchorElement>(sel.employer)
+                ?.href?.match(/employer\/(\d+)/)?.[1] ?? null,
+            employer_name: c.querySelector(sel.employer)?.textContent?.trim() ?? "",
+            salary_from: nums[0] ?? null,
+            salary_to: nums[1] ?? nums[0] ?? null,
+            currency: salaryText.includes("₽") ? "RUR" : salaryText ? "OTHER" : null,
+            work_format: /удал[её]нн/i.test(c.textContent ?? "")
+              ? "remote"
+              : /гибрид/i.test(c.textContent ?? "")
+                ? "hybrid"
+                : "unknown",
+            experience: null,
+            published_at: null,
+            raw_json: JSON.stringify({ card: c.textContent?.slice(0, 2000) }),
+            source: "hh",
+          };
+        }),
+      SEL,
+    )
+    .then((list) => list.filter((v) => v.id));
 }
 
 async function main() {
@@ -62,7 +81,9 @@ async function main() {
   try {
     cards = await browser.searchVacancies('"AI-инженер" OR "LLM"', 1);
   } catch (err) {
-    console.log(`[probe] searchVacancies() threw (${(err as Error).message}) — bypassing guard for probe purposes only.`);
+    console.log(
+      `[probe] searchVacancies() threw (${(err as Error).message}) — bypassing guard for probe purposes only.`,
+    );
     cards = await extractCardsDirect(page);
   }
 
@@ -75,16 +96,20 @@ async function main() {
   console.log("[probe] saved tmp/search-page.html");
 
   if (cards.length > 0) {
-    const first = cards[0];
+    const first = cards[0]!;
     console.log(`[probe] fetching vacancy text for: ${first.url}`);
     let text = "";
     try {
       text = await browser.fetchVacancyText(first.url);
     } catch (err) {
-      console.log(`[probe] fetchVacancyText() threw (${(err as Error).message}) — extracting directly for probe purposes only.`);
-      const title = await page.locator("h1").first().textContent() ?? "";
-      const body = await page.locator(SEL.description).textContent() ?? "";
-      const meta = await page.locator('[data-qa="vacancy-experience"], [data-qa*="work-formats"]').allTextContents();
+      console.log(
+        `[probe] fetchVacancyText() threw (${(err as Error).message}) — extracting directly for probe purposes only.`,
+      );
+      const title = (await page.locator("h1").first().textContent()) ?? "";
+      const body = (await page.locator(SEL.description).textContent()) ?? "";
+      const meta = await page
+        .locator('[data-qa="vacancy-experience"], [data-qa*="work-formats"]')
+        .allTextContents();
       text = `${title}\n${meta.join("\n")}\n${body}`.trim();
     }
     console.log(`[probe] vacancy text length: ${text.length}`);
@@ -99,13 +124,15 @@ async function main() {
   }
 
   if (cards.length > 0) {
-    const first = cards[0];
+    const first = cards[0]!;
     console.log(`[probe] apply() dry-run for: ${first.url}`);
     try {
       const result = await browser.apply(first.url, "тестовое письмо от hh-agent (dry run)", true);
       console.log(`[probe] apply() result: ${result}`);
     } catch (err) {
-      console.log(`[probe] apply() threw (${(err as Error).name}: ${(err as Error).message}) — expected if not logged in to hh.ru.`);
+      console.log(
+        `[probe] apply() threw (${(err as Error).name}: ${(err as Error).message}) — expected if not logged in to hh.ru.`,
+      );
     }
   } else {
     console.log("[probe] no cards found — skipping apply() dry-run.");

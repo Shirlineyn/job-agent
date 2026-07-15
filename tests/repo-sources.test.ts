@@ -6,15 +6,25 @@ import { dedupKey } from "../src/state/dedup.js";
 import type { VacancyInsert } from "../src/state/types.js";
 
 const mk = (over: Partial<VacancyInsert>): VacancyInsert => ({
-  id: "hh1", url: "https://hh.ru/vacancy/1", title: "ML Engineer", employer_id: "e1",
-  employer_name: "Acme", salary_from: null, salary_to: null, currency: null,
-  work_format: null, experience: null, published_at: null, raw_json: null,
-  source: "hh", ...over,
+  id: "hh1",
+  url: "https://hh.ru/vacancy/1",
+  title: "ML Engineer",
+  employer_id: "e1",
+  employer_name: "Acme",
+  salary_from: null,
+  salary_to: null,
+  currency: null,
+  work_format: null,
+  experience: null,
+  published_at: null,
+  raw_json: null,
+  source: "hh",
+  ...over,
 });
 
 describe("dedupKey", () => {
   it("нормализует регистр, кавычки и пробелы", () => {
-    expect(dedupKey('ООО  «Акме»', ' ML   Engineer ')).toBe("ооо акме|ml engineer");
+    expect(dedupKey("ООО  «Акме»", " ML   Engineer ")).toBe("ооо акме|ml engineer");
   });
 });
 

@@ -11,14 +11,23 @@ import { join } from "node:path";
 
 async function main(): Promise<void> {
   const profileDir = join(homedir(), ".hh-agent", "profile");
-  const ctx = await chromium.launchPersistentContext(profileDir, { headless: false, viewport: null });
-  const page = ctx.pages()[0] ?? await ctx.newPage();
+  const ctx = await chromium.launchPersistentContext(profileDir, {
+    headless: false,
+    viewport: null,
+  });
+  const page = ctx.pages()[0] ?? (await ctx.newPage());
   await page.goto("https://hh.ru/account/login", { waitUntil: "domcontentloaded" });
 
   console.log("[login] Браузер открыт. Войдите в аккаунт hh.ru (и пройдите капчу, если есть).");
-  console.log("[login] Когда закончите — просто закройте окно браузера. Сессия сохранится в профиле.");
+  console.log(
+    "[login] Когда закончите — просто закройте окно браузера. Сессия сохранится в профиле.",
+  );
 
-  await new Promise<void>((resolve) => ctx.on("close", () => resolve()));
+  await new Promise<void>((resolve) =>
+    ctx.on("close", () => {
+      resolve();
+    }),
+  );
   console.log("[login] Окно закрыто, сессия сохранена. Готово.");
 }
 

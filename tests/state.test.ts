@@ -5,10 +5,19 @@ import * as repo from "../src/state/repo.js";
 
 const mkDb = () => openDb(":memory:");
 const v = (id: string) => ({
-  id, url: `https://hh.ru/vacancy/${id}`, title: "AI engineer",
-  employer_id: "e1", employer_name: "Acme", salary_from: 200000, salary_to: null,
-  currency: "RUR", work_format: "remote" as const, experience: "1-3",
-  published_at: "2026-07-01", raw_json: "{}", source: "hh",
+  id,
+  url: `https://hh.ru/vacancy/${id}`,
+  title: "AI engineer",
+  employer_id: "e1",
+  employer_name: "Acme",
+  salary_from: 200000,
+  salary_to: null,
+  currency: "RUR",
+  work_format: "remote" as const,
+  experience: "1-3",
+  published_at: "2026-07-01",
+  raw_json: "{}",
+  source: "hh",
 });
 
 describe("repo", () => {

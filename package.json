@@ -1,21 +1,41 @@
 {
-  "name": "hh-agent",
+  "name": "job-agent",
+  "version": "1.0.0",
+  "private": true,
   "type": "module",
+  "description": "Автономный ИИ-агент: ищет вакансии на пяти площадках, оценивает их LLM под конкретное резюме и готовит персональные отклики. Локальный MCP-сервер на TypeScript.",
+  "keywords": [
+    "ai-agent",
+    "llm",
+    "anthropic",
+    "mcp",
+    "rag",
+    "prompt-engineering",
+    "playwright",
+    "job-search",
+    "typescript"
+  ],
+  "author": "Aleksandr Doronin <doronin.alex001@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shirlineyn/job-agent.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -34,8 +54,14 @@
     "@types/node": "^26.1.0",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^8.0.1",
+    "@eslint/js": "^9.16.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "eslint": "^9.16.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.4.2",
     "tsx": "^4.22.5",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.18.0",
     "vitest": "^4.1.9"
   }
 }

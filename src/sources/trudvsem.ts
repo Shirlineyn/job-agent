@@ -3,6 +3,7 @@ import type { VacancyInsert, VacancyRow, WorkFormat } from "../state/types.js";
 import type { Fetch } from "./http.js";
 import type { JobSource } from "./types.js";
 import { getJson, politePause, stripHtml } from "./http.js";
+import { fetchTextFromRawJson } from "./shared.js";
 
 // Реальная схема API (curl-сверка 2026-07-13, docs/job-boards-research.md, раздел trudvsem)
 // отличается от исходной фикстуры брифа в одном месте:
@@ -16,15 +17,24 @@ import { getJson, politePause, stripHtml } from "./http.js";
 //   нормализуем через `|| null`, а не `?? null`.
 // - `offset` подтверждён curl'ом как номер СТРАНИЦЫ (0-based): offset=0 и offset=1 при
 //   limit=2 отдают непересекающиеся вакансии.
-type TvVacancy = {
-  id: string; "job-name": string; salary_min?: number | null; salary_max?: number | null;
-  duty?: string; requirements?: string;
+interface TvVacancy {
+  id: string;
+  "job-name": string;
+  salary_min?: number | null;
+  salary_max?: number | null;
+  duty?: string;
+  requirements?: string;
   company: { name: string; email?: string; companycode?: string; inn?: string } | null;
-  vac_url?: string; "creation-date"?: string; schedule?: string;
-};
-type TvResp = { status: string; results?: { vacancies?: { vacancy: TvVacancy }[] } };
+  vac_url?: string;
+  "creation-date"?: string;
+  schedule?: string;
+}
+interface TvResp {
+  status: string;
+  results?: { vacancies?: { vacancy: TvVacancy }[] };
+}
 
-const MAX_PAGES = 2;   // 200 на слово в Москве — больше по IT там просто нет
+const MAX_PAGES = 2; // 200 на слово в Москве — больше по IT там просто нет
 const TIMEOUT = 60_000; // API госпортала медленное, ~4-5 c на запрос
 
 function fmt(schedule: string | undefined): WorkFormat {
@@ -40,8 +50,11 @@ export function trudvsemSource(f: Fetch = fetch): JobSource {
       for (const kw of keywords) {
         for (let page = 0; page < MAX_PAGES; page++) {
           // offset у trudvsem — номер СТРАНИЦЫ (0-based), не записи
-          const resp = await getJson<TvResp>(f,
-            `https://opendata.trudvsem.ru/api/v1/vacancies/region/77?text=${encodeURIComponent(kw)}&limit=100&offset=${page}`, TIMEOUT);
+          const resp = await getJson<TvResp>(
+            f,
+            `https://opendata.trudvsem.ru/api/v1/vacancies/region/77?text=${encodeURIComponent(kw)}&limit=100&offset=${page}`,
+            TIMEOUT,
+          );
           const items = resp.results?.vacancies ?? [];
           for (const { vacancy: v } of items) {
             // Битая запись без company.name — пропускаем ЭТУ запись, не роняем весь батч источника
@@ -52,13 +65,16 @@ export function trudvsemSource(f: Fetch = fetch): JobSource {
             seen.add(id);
             const text = stripHtml([v.duty ?? "", v.requirements ?? ""].join("\n"));
             out.push({
-              id, url: v.vac_url ?? `https://trudvsem.ru/vacancy/card/${v.company.companycode}/${v.id}`,
+              id,
+              url: v.vac_url ?? `https://trudvsem.ru/vacancy/card/${v.company.companycode}/${v.id}`,
               title: v["job-name"],
               employer_id: `trudvsem:${v.company.companycode ?? v.company.inn ?? v.company.name.toLowerCase().trim()}`,
               employer_name: v.company.name,
-              salary_from: v.salary_min || null, salary_to: v.salary_max || null,
+              salary_from: v.salary_min || null,
+              salary_to: v.salary_max || null,
               currency: v.salary_min || v.salary_max ? "RUR" : null,
-              work_format: fmt(v.schedule), experience: null,
+              work_format: fmt(v.schedule),
+              experience: null,
               published_at: v["creation-date"] ?? null,
               // text — для скоринга без повторного похода; email — подхватит email-flow
               raw_json: JSON.stringify({ text, email: v.company.email ?? null }),
@@ -71,10 +87,8 @@ export function trudvsemSource(f: Fetch = fetch): JobSource {
       }
       return out;
     },
-    async fetchText(v: VacancyRow): Promise<string> {
-      const text = (JSON.parse(v.raw_json ?? "{}") as { text?: string }).text;
-      if (!text) throw new Error(`trudvsem: нет текста в raw_json для ${v.id}`);
-      return text;
+    fetchText(v: VacancyRow): Promise<string> {
+      return Promise.resolve(fetchTextFromRawJson(v, "trudvsem"));
     },
   };
 }

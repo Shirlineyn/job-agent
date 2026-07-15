@@ -8,9 +8,19 @@ import type { JobSource } from "../src/sources/types.js";
 import type { VacancyInsert } from "../src/state/types.js";
 
 const card = (id: string, source: string, title: string): VacancyInsert => ({
-  id, url: `https://x.test/${id}`, title, employer_id: `${source}:acme`, employer_name: "Acme " + id,
-  salary_from: 300000, salary_to: null, currency: "RUR", work_format: "remote",
-  experience: null, published_at: new Date().toISOString(), raw_json: JSON.stringify({ text: "текст вакансии про LLM" }), source,
+  id,
+  url: `https://x.test/${id}`,
+  title,
+  employer_id: `${source}:acme`,
+  employer_name: "Acme " + id,
+  salary_from: 300000,
+  salary_to: null,
+  currency: "RUR",
+  work_format: "remote",
+  experience: null,
+  published_at: new Date().toISOString(),
+  raw_json: JSON.stringify({ text: "текст вакансии про LLM" }),
+  source,
 });
 
 function fakeSource(name: string, cards: VacancyInsert[]): JobSource {
@@ -23,18 +33,29 @@ function fakeSource(name: string, cards: VacancyInsert[]): JobSource {
 
 function mkDeps(db: ReturnType<typeof openDb>, sources: JobSource[]): Deps {
   return {
-    db, cfg: ConfigSchema.parse({ mode: "dry_run", searchQueries: [], scoreThreshold: 65 }),
+    db,
+    cfg: ConfigSchema.parse({ mode: "dry_run", searchQueries: [], scoreThreshold: 65 }),
     browser: {
       searchVacancies: vi.fn().mockResolvedValue([]),
-      fetchVacancyText: vi.fn(), apply: vi.fn(), waitCaptchaCleared: vi.fn(),
-    } as never,
+      fetchVacancyText: vi.fn(),
+      apply: vi.fn(),
+      waitCaptchaCleared: vi.fn(),
+    },
     // scoreVacancy (src/llm/scoring.ts) валидирует полную схему через zod — salary_match/seniority_match
     // обязательны, иначе parseScore бросит InvalidScoreJson и вакансия уйдёт в failed вместо queued/skipped.
-    claude: vi.fn().mockResolvedValue(JSON.stringify({
-      score: 80, reasons: ["ok"], red_flags: [], salary_match: "match", seniority_match: "match",
-    })) as never,
+    claude: vi.fn().mockResolvedValue(
+      JSON.stringify({
+        score: 80,
+        reasons: ["ok"],
+        red_flags: [],
+        salary_match: "match",
+        seniority_match: "match",
+      }),
+    ) as never,
     pplx: vi.fn().mockResolvedValue("research") as never,
-    notify: vi.fn(), resume: "резюме", sources,
+    notify: vi.fn(),
+    resume: "резюме",
+    sources,
   };
 }
 
@@ -47,12 +68,16 @@ describe("runSession с новыми источниками", () => {
     expect(s.discovered).toBe(1);
     expect(src.search).toHaveBeenCalled();
     const v = repo.getVacancy(db, "hirehi:1")!;
-    expect(["queued", "skipped"]).toContain(v.status);   // проскорена, браузер не трогали
-    expect((deps.browser.fetchVacancyText as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(["queued", "skipped"]).toContain(v.status); // проскорена, браузер не трогали
+    expect(deps.browser.fetchVacancyText as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
   it("падение одного источника не валит прогон", async () => {
     const db = openDb(":memory:");
-    const bad: JobSource = { name: "habr", search: vi.fn().mockRejectedValue(new Error("503")), fetchText: vi.fn() };
+    const bad: JobSource = {
+      name: "habr",
+      search: vi.fn().mockRejectedValue(new Error("503")),
+      fetchText: vi.fn(),
+    };
     const ok = fakeSource("hirehi", [card("hirehi:2", "hirehi", "ML Engineer")]);
     const s = await runSession(mkDeps(db, [bad, ok]), "manual", "dry_run");
     expect(s.discovered).toBe(1);
@@ -77,9 +102,13 @@ describe("runSession с новыми источниками", () => {
   it("не-hh вакансии не попадают в браузерный apply", async () => {
     const db = openDb(":memory:");
     repo.upsertVacancy(db, card("hirehi:3", "hirehi", "AI Engineer"));
-    repo.setStatus(db, "hirehi:3", "queued", { score: 90, score_reasons: "{}", raw_json: JSON.stringify({ text: "t" }) });
+    repo.setStatus(db, "hirehi:3", "queued", {
+      score: 90,
+      score_reasons: "{}",
+      raw_json: JSON.stringify({ text: "t" }),
+    });
     const deps = mkDeps(db, []);
     await runSession(deps, "manual", "live");
-    expect((deps.browser.apply as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    expect(deps.browser.apply as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 });

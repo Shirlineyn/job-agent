@@ -4,12 +4,35 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 
+// Личность кандидата — единый источник правды для промптов, подписей и валидатора
+// письма (раньше строки «Александр Доронин» были захардкожены в 5+ местах). Формы имени
+// хранятся отдельно: русская грамматика требует родительного падежа в «по поручению …»,
+// «ИИ-агент …» — интерполяция nominative сломала бы текст.
+export const CandidateSchema = z.object({
+  name: z.string().default("Александр Доронин"), // именительный
+  nameGenitive: z.string().default("Александра Доронина"), // родительный (полное имя)
+  firstNameGenitive: z.string().default("Александра"), // родительный (только имя)
+  roleTitle: z.string().default("AI-инженер / аналитик данных"),
+  city: z.string().default("Москва"),
+  signatureToken: z.string().default("Доронин"), // подстрока-маркер подписи для validateLetter
+});
+export type Candidate = z.infer<typeof CandidateSchema>;
+
 export const ConfigSchema = z.object({
   port: z.number().default(7010),
+  candidate: CandidateSchema.default({
+    name: "Александр Доронин",
+    nameGenitive: "Александра Доронина",
+    firstNameGenitive: "Александра",
+    roleTitle: "AI-инженер / аналитик данных",
+    city: "Москва",
+    signatureToken: "Доронин",
+  }),
+  timezone: z.string().default("Europe/Moscow"),
+  // Домены, которым разрешено появляться ссылкой в письме (репозиторий-пруф, сайт работодателя).
+  letterUrlWhitelist: z.array(z.string()).default(["tedo.ru", "github.com"]),
   resumePath: z.string().default(join(homedir(), ".hh-agent", "master.md")),
-  searchQueries: z
-    .array(z.string())
-    .default(['"AI-инженер" OR "LLM" OR "ML-инженер"']),
+  searchQueries: z.array(z.string()).default(['"AI-инженер" OR "LLM" OR "ML-инженер"']),
   // Новые источники ищут по простым ключевым словам (их поиск не понимает hh-синтаксис "A OR B").
   enabledSources: z
     .array(z.enum(["hirehi", "habr", "getmatch", "trudvsem"]))
@@ -26,9 +49,7 @@ export const ConfigSchema = z.object({
         .array(z.enum(["office", "hybrid", "remote", "unknown"]))
         .default(["office", "hybrid", "remote", "unknown"]),
       freshDays: z.number().default(7),
-      maxExperience: z
-        .array(z.string())
-        .default(["noExperience", "between1And3", "between3And6"]),
+      maxExperience: z.array(z.string()).default(["noExperience", "between1And3", "between3And6"]),
     })
     .default({
       salaryMin: 200000,
@@ -49,7 +70,12 @@ export const ConfigSchema = z.object({
       user: z.string().default("doronin.alex001@gmail.com"),
       fromName: z.string().default("Александр Доронин"),
     })
-    .default({ host: "smtp.gmail.com", port: 465, user: "doronin.alex001@gmail.com", fromName: "Александр Доронин" }),
+    .default({
+      host: "smtp.gmail.com",
+      port: 465,
+      user: "doronin.alex001@gmail.com",
+      fromName: "Александр Доронин",
+    }),
   resumePdfPath: z.string().nullable().default(null),
   // Ссылка на открытый код пайплайна в холодных письмах (вариант «агент как доказательство»).
   // null, пока репозиторий не опубликован (иначе получатель кликнет в 404); после публикации —

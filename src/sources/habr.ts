@@ -12,21 +12,27 @@ import { getJson, getText, politePause, stripHtml } from "./http.js";
 //   вместо них публикуется `predictedSalary` (оценка Хабра, НЕ вилка работодателя — не берём);
 // - карточка /vacancies/<id> — статический HTML с одним <script type="application/ld+json">
 //   (schema.org JobPosting), description — HTML полного описания.
-type HabrItem = {
-  id: number; href: string; title: string; remoteWork: boolean;
+interface HabrItem {
+  id: number;
+  href: string;
+  title: string;
+  remoteWork: boolean;
   salary: { from: number | null; to: number | null; currency: string | null } | null;
   company: { id: number; title: string; alias_name?: string };
   publishedDate?: { date?: string } | string | null;
   locations?: { title: string }[];
-};
-type ListResp = { list: HabrItem[]; meta: { totalPages: number } };
+}
+interface ListResp {
+  list: HabrItem[];
+  meta: { totalPages: number };
+}
 
-const MAX_PAGES = 3;   // 150 свежих на слово при sort=date — дальше старьё
+const MAX_PAGES = 3; // 150 свежих на слово при sort=date — дальше старьё
 
 export function extractJsonLd(html: string): string {
-  const m = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
-  if (!m) throw new Error("habr: JSON-LD не найден на карточке");
-  const data = JSON.parse(m[1]) as { description?: string };
+  const raw = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)?.[1];
+  if (raw === undefined) throw new Error("habr: JSON-LD не найден на карточке");
+  const data = JSON.parse(raw) as { description?: string };
   if (!data.description) throw new Error("habr: JobPosting без description");
   return stripHtml(data.description);
 }
@@ -39,21 +45,36 @@ export function habrSource(f: Fetch = fetch): JobSource {
       const out: VacancyInsert[] = [];
       for (const kw of keywords) {
         for (let page = 1; page <= MAX_PAGES; page++) {
-          const resp = await getJson<ListResp>(f,
-            `https://career.habr.com/api/frontend/vacancies?q=${encodeURIComponent(kw)}&page=${page}&per_page=50&sort=date`);
+          const resp = await getJson<ListResp>(
+            f,
+            `https://career.habr.com/api/frontend/vacancies?q=${encodeURIComponent(kw)}&page=${page}&per_page=50&sort=date`,
+          );
           if (!Array.isArray(resp.list)) throw new Error("habr: неожиданная схема (нет list)");
           for (const it of resp.list) {
             const id = `habr:${it.id}`;
             if (seen.has(id)) continue;
             seen.add(id);
-            const pub = typeof it.publishedDate === "string" ? it.publishedDate : it.publishedDate?.date ?? null;
+            const pub =
+              typeof it.publishedDate === "string"
+                ? it.publishedDate
+                : (it.publishedDate?.date ?? null);
             out.push({
-              id, url: `https://career.habr.com${it.href}`, title: it.title,
-              employer_id: `habr:${it.company.id}`, employer_name: it.company.title,
-              salary_from: it.salary?.from ?? null, salary_to: it.salary?.to ?? null,
-              currency: it.salary?.currency?.toUpperCase() === "RUR" ? "RUR" : it.salary?.currency ?? null,
-              work_format: it.remoteWork ? "remote" : "unknown",   // офис/гибрид в списке не различимы
-              experience: null, published_at: pub, raw_json: JSON.stringify(it), source: "habr",
+              id,
+              url: `https://career.habr.com${it.href}`,
+              title: it.title,
+              employer_id: `habr:${it.company.id}`,
+              employer_name: it.company.title,
+              salary_from: it.salary?.from ?? null,
+              salary_to: it.salary?.to ?? null,
+              currency:
+                it.salary?.currency?.toUpperCase() === "RUR"
+                  ? "RUR"
+                  : (it.salary?.currency ?? null),
+              work_format: it.remoteWork ? "remote" : "unknown", // офис/гибрид в списке не различимы
+              experience: null,
+              published_at: pub,
+              raw_json: JSON.stringify(it),
+              source: "habr",
             });
           }
           if (page >= resp.meta.totalPages) break;
