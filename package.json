@@ -37,13 +37,13 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.110.0",
+    "@anthropic-ai/sdk": "^0.112.4",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "imapflow": "^1.4.7",
-    "node-cron": "^4.5.0",
+    "node-cron": "^4.6.0",
     "nodemailer": "^9.0.3",
     "playwright": "^1.61.1",
     "zod": "^4.4.3"
@@ -51,17 +51,17 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.1.1",
     "@types/node-cron": "^3.0.11",
     "@types/nodemailer": "^8.0.1",
     "@eslint/js": "^9.16.0",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^9.16.0",
     "eslint-config-prettier": "^9.1.0",
-    "prettier": "^3.4.2",
-    "tsx": "^4.22.5",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.18.0",
+    "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.9"
   }
 }
