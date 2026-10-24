@@ -15,6 +15,7 @@ export async function callPerplexity(
           headers: {
             authorization: `Bearer ${process.env.PERPLEXITY_API_KEY}`,
             "content-type": "application/json",
+            "x-pplx-integration": "job-agent",
           },
           body: JSON.stringify(req),
         });
